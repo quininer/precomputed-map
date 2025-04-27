@@ -1,18 +1,25 @@
 use core::marker::PhantomData;
 use crate::DataStore;
+use crate::util::U64Array;
 
 pub struct Simple<'data, const N: usize, T> {
     data: &'data [T; N]
 }
 
 pub struct Compact<'data, const N: usize> {
-    bits: BitVec<'data>,
+    bits: BitVec<'data, N>,
     data: &'data [u8],
-    _phantom: PhantomData<[u8; N]>
+    _phantom: PhantomData<[&'data [u8]; N]>
 }
 
-pub struct BitVec<'data> {
-    bits: &'data [u8]
+/// bitvec + super blocks
+///
+/// bitvec: [u64];
+/// blocks: [u64];
+/// super blocks: [u64];
+pub struct BitVec<'data, const N: usize> {
+    bits: U64Array<'data, N>,
+    _phantom: PhantomData<[u64; N]>
 }
 
 pub struct Store<K, V>(pub K, pub V);
@@ -67,7 +74,7 @@ impl<'data, const N: usize> List for Compact<'data, N> {
     }
 }
 
-impl BitVec<'_> {
+impl<const N: usize> BitVec<'_, N> {
     pub fn get_and_next(&self, index: usize) -> Option<(usize, usize)> {
         todo!()
     }
