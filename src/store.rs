@@ -1,17 +1,31 @@
 use core::marker::PhantomData;
 use crate::MapStore;
-use crate::util::U64Array;
 
 pub struct Simple<'data, const N: usize, T> {
     data: &'data [T; N]
 }
 
-pub struct Compact<'data, const B: usize, const N: usize> {
-    data: &'data [u8],
-    index: PhantomData<(&'data [u8; B], &'data [u8; N])>
+pub struct SimpleRef<'data, const N: usize, T> {
+    data: &'data [T; N]
 }
 
-pub struct Store<K, V>(pub K, pub V);
+pub struct NumberSeq<
+    'data,
+    const INDEX: usize,
+    const LEN: usize,
+> {
+    data: &'data [u8; INDEX],
+    _phantom: PhantomData<[(); LEN]>
+}
+
+pub struct Compact<
+    'data,
+    const DATA: usize,
+    SEQ
+> {
+    seq: SEQ,
+    data: &'data [u8; DATA],
+}
 
 pub trait List<'data> {
     type Item: 'data;
@@ -20,7 +34,7 @@ pub trait List<'data> {
     fn get(&self, index: usize) -> Self::Item;
 }
 
-impl<'data, K, V> MapStore<'data> for Store<K, V>
+impl<'data, K, V> MapStore<'data> for (K, V)
 where
     K: List<'data>,
     V: List<'data>
@@ -42,7 +56,17 @@ where
     }
 }
 
-impl<'data, const N: usize, T> List<'data> for Simple<'data, N, T> {
+impl<'data, const N: usize, T: Copy> List<'data> for Simple<'data, N, T> {
+    type Item = T;
+
+    const LEN: usize = N;
+
+    fn get(&self, index: usize) -> Self::Item {
+        self.data[index]
+    }
+}
+
+impl<'data, const N: usize, T> List<'data> for SimpleRef<'data, N, T> {
     type Item = &'data T;
 
     const LEN: usize = N;
@@ -52,22 +76,38 @@ impl<'data, const N: usize, T> List<'data> for Simple<'data, N, T> {
     }
 }
 
-impl<'data, const B: usize, const N: usize> List<'data> for Compact<'data, B, N> {
-    type Item = &'data [u8];
+impl<
+    'data,
+    const INDEX: usize,
+    const LEN: usize
+> List<'data> for NumberSeq<'data, INDEX, LEN> {
+    type Item = u32;
 
-    const LEN: usize = N;
+    const LEN: usize = LEN;
 
     fn get(&self, index: usize) -> Self::Item {
         todo!()
     }
 }
 
-impl<'data, const B: usize> List<'data> for U64Array<'data, B> {
-    type Item = u64;
+impl<
+    'data,
+    const DATA: usize,
+    SEQ: List<'data, Item = u32>,
+> List<'data> for Compact<'data, DATA, SEQ> {
+    type Item = &'data [u8];
 
-    const LEN: usize = <U64Array<'data, B>>::LEN;
+    const LEN: usize = SEQ::LEN;
 
     fn get(&self, index: usize) -> Self::Item {
-        self.get_u64(index).unwrap()
+        let start: usize = index.checked_sub(1)
+            .map(|index| self.seq.get(index))
+            .unwrap_or_default()
+            .try_into()
+            .unwrap();
+        let end: usize = self.seq.get(index)
+            .try_into()
+            .unwrap();
+        &self.data[start..end]
     }
 }
