@@ -4,20 +4,13 @@
 pub mod builder;
 mod store;
 mod chd;
-mod eliasfano;
+mod aligned;
 
-mod util;
-
-use core::num::Wrapping;
 use core::borrow::Borrow;
 use core::hash::{ Hasher, Hash };
 use core::marker::PhantomData;
-use store::List;
-use util::{ fast_reduct32, fast_reduct64 };
-
-pub trait U128Hasher: Hasher {
-    fn finish_u128(&self) -> u128;
-}
+use store::AccessList;
+pub use chd::{ DoubleHasher, Hasher128 };
 
 pub trait MapStore<'data> {
     type Key: 'data;
@@ -90,12 +83,12 @@ where
     where
         Q: Hash + ?Sized
     {
-        let size: u64 = D::LEN.try_into().unwrap();
+        let size: u32 = D::LEN.try_into().unwrap();
 
         let mut hasher = H::default();
         self.seed.hash(&mut hasher);
         key.hash(&mut hasher);
-        let index = fast_reduct64(hasher.finish(), size);
+        let index = fast_reduct32(hasher.finish() as u32, size);
         index.try_into().unwrap()
     }
 
@@ -125,17 +118,11 @@ pub struct MediumMap<'data, A, D, H> {
 
 impl<'data, A, D, H> MediumMap<'data, A, D, H>
 where
-    A: List<'data, Item = u64>,
+    A: AccessList<'data, Item = u64>,
     D: MapStore<'data>,
     D::Key: Hash + Eq + Copy,
-    H: U128Hasher + Default,
+    H: Hasher128 + Default,
 {
-    const _ASSERT: () = {
-        if A::LEN != D::LEN {
-            panic!()
-        }
-    };
-    
     pub const fn new(seed: u64, disps: A, data: D)
         -> MediumMap<'data, A, D, H>
     {
@@ -152,8 +139,7 @@ where
         let len = D::LEN.try_into().unwrap();
         let disps_len: u32 = A::LEN.try_into().unwrap();
         
-        let mut hasher = H::default();
-        self.seed.hash(&mut hasher);
+        let mut hasher = H::with_seed(self.seed);
         key.hash(&mut hasher);
         let hash = hasher.finish_u128();
 
@@ -163,7 +149,7 @@ where
         let h2 = h2 as u32;
 
         let disps_idx = fast_reduct32(g, disps_len).try_into().unwrap();
-        let disp = self.disps.get(disps_idx);
+        let disp = self.disps.index(disps_idx);
         let d0 = (disp >> 32) as u32;
         let d1 = disp as u32;
 
@@ -185,3 +171,7 @@ where
     }
 }
 
+// https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
+fn fast_reduct32(x: u32, limit: u32) -> u32 {
+    ((x as u64) * (limit as u64) >> 32) as u32
+}
