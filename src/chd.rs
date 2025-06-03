@@ -1,8 +1,12 @@
-use core::hash::Hasher;
+use core::hash::{ Hash, Hasher };
+use core::marker::PhantomData;
 
-pub trait Hasher128: Hasher {
-    fn with_seed(k: u64) -> Self;
-    fn finish_u128(&self) -> u128;
+pub trait HashOne {
+    fn hash_one<T: Hash>(k: u64, v: T) -> u64;
+}
+
+pub trait HashOne128 {
+    fn hash_one128<T: Hash>(k: u64, v: T) -> u128;
 }
 
 pub fn displace(h1: u32, h2: u32, d0: u32, d1: u32) -> u32 {
@@ -13,31 +17,28 @@ pub fn displace(h1: u32, h2: u32, d0: u32, d1: u32) -> u32 {
     h1.wrapping_add(d0.wrapping_mul(h2)).wrapping_add(d1)
 }
 
-pub struct DoubleHasher<H: Hasher>(H, H);
+#[derive(Default)]
+pub struct U64Hasher<H: Hasher + Default>(PhantomData<H>);
 
-impl<H: Hasher> Hasher for DoubleHasher<H> {
-    fn write(&mut self, bytes: &[u8]) {
-        self.0.write(bytes);
-        self.1.write(bytes);
-    }
-
-    fn finish(&self) -> u64 {
-        self.0.finish()
+impl<H: Hasher + Default> HashOne for U64Hasher<H> {
+    fn hash_one<T: Hash>(k: u64, v: T) -> u64 {
+        let mut h = H::default();
+        k.hash(&mut h);
+        v.hash(&mut h);
+        h.finish()
     }
 }
 
-impl<H: Default + Hasher> Hasher128 for DoubleHasher<H> {
-    fn with_seed(k: u64) -> Self {
+impl<H: Hasher + Default> HashOne128 for U64Hasher<H> {
+    fn hash_one128<T: Hash>(k: u64, v: T) -> u128 {
         let mut h1 = H::default();
         let mut h2 = H::default();
         h1.write_u64(k);
         h2.write_u64(k ^ 0x1);
-        DoubleHasher(h1, h2)
-    }
-    
-    fn finish_u128(&self) -> u128 {
-        let h1 = self.0.finish();
-        let h2 = self.1.finish();
+        v.hash(&mut h1);
+        v.hash(&mut h2);
+        let h1 = h1.finish();
+        let h2 = h2.finish();
         u128::from(h1 << 64) | u128::from(h2)
     }
 }

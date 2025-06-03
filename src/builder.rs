@@ -1,31 +1,23 @@
-use std::hash::Hash;
-use std::marker::PhantomData;
-use crate::Hasher128;
+use std::cmp::Ordering;
 
 
 #[derive(Default)]
-pub struct MapBuilder<K, V, H> {
-    datas: Vec<(K, V)>,
-    _phantom: PhantomData<H>
+pub struct MapBuilder<'f, T> {
+    datas: Vec<T>,
+    eq: Option<&'f dyn Fn(&T, &T) -> bool>,
+    ord: Option<&'f dyn Fn(&T, &T) -> Ordering>,
+    hash: Option<&'f dyn Fn(&T, u64) -> u64>,
+    hash128: Option<&'f dyn Fn(&T, u64) -> u128>,
+    as_bytes: Option<&'f dyn Fn(&T) -> &[u8]>,
 }
 
-impl<K, V, H> Extend<(K, V)> for MapBuilder<K, V, H> {
-    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
-        self.datas.extend(iter);
+impl<'f, T> MapBuilder<'f, T> {
+    pub fn insert(&mut self, v: T) {
+        self.datas.push(v);
     }
 }
 
-impl<K, V, H> MapBuilder<K, V, H> {
-    pub fn insert(&mut self, k: K, v: V) {
-        self.datas.push((k, v));
-    }
-}
-
-impl<K, V, H> MapBuilder<K, V, H>
-where
-    K: Hash + Eq,
-    H: Hasher128
-{
+impl<'f, T> MapBuilder<'f, T> {
     pub fn build_tiny(&self) {
         todo!()
     }

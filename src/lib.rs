@@ -7,10 +7,10 @@ mod chd;
 mod aligned;
 
 use core::borrow::Borrow;
-use core::hash::{ Hasher, Hash };
+use core::hash::Hash;
 use core::marker::PhantomData;
 use store::AccessList;
-pub use chd::{ DoubleHasher, Hasher128 };
+pub use chd::{ HashOne, HashOne128 };
 
 pub trait MapStore<'data> {
     type Key: 'data;
@@ -70,7 +70,7 @@ impl<'data, D, H> SmallMap<'data, D, H>
 where
     D: MapStore<'data>,
     D::Key: Hash + Eq + Copy,
-    H: Hasher + Default,
+    H: HashOne
 {
     pub const fn new(seed: u64, data: D) -> SmallMap<'data, D, H> {
         SmallMap {
@@ -85,10 +85,8 @@ where
     {
         let size: u32 = D::LEN.try_into().unwrap();
 
-        let mut hasher = H::default();
-        self.seed.hash(&mut hasher);
-        key.hash(&mut hasher);
-        let index = fast_reduct32(hasher.finish() as u32, size);
+        let hash = H::hash_one(self.seed, key) as u32;
+        let index = fast_reduct32(hash, size);
         index.try_into().unwrap()
     }
 
@@ -121,7 +119,7 @@ where
     A: AccessList<'data, Item = u64>,
     D: MapStore<'data>,
     D::Key: Hash + Eq + Copy,
-    H: Hasher128 + Default,
+    H: HashOne128
 {
     pub const fn new(seed: u64, disps: A, data: D)
         -> MediumMap<'data, A, D, H>
@@ -139,9 +137,7 @@ where
         let len = D::LEN.try_into().unwrap();
         let disps_len: u32 = A::LEN.try_into().unwrap();
         
-        let mut hasher = H::with_seed(self.seed);
-        key.hash(&mut hasher);
-        let hash = hasher.finish_u128();
+        let hash = H::hash_one128(self.seed, key);
 
         let h1 = (hash >> 64) as u32;
         let h2 = hash as u64;
