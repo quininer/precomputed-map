@@ -9,6 +9,14 @@ pub trait HashOne128 {
     fn hash_one128<T: Hash>(k: u64, v: T) -> u128;
 }
 
+pub fn split_key(hash: u128) -> (u32, u32, u32) {
+    let h1 = (hash >> 64) as u32;
+    let h2 = hash as u64;
+    let g = (h2 >> 32) as u32;
+    let h2 = h2 as u32;    
+    (g, h1, h2)
+}
+
 pub fn displace(h1: u32, h2: u32, d0: u32, d1: u32) -> u32 {
     // Then, for each bucket Bi, 0 ≤ i < r,
     // we will assign a pair of displacements (d0, d1) so that each key x ∈ Bi is placed in an empty bin

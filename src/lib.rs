@@ -139,11 +139,7 @@ where
         
         let hash = H::hash_one128(self.seed, key);
 
-        let h1 = (hash >> 64) as u32;
-        let h2 = hash as u64;
-        let g = (h2 >> 32) as u32;
-        let h2 = h2 as u32;
-
+        let (g, h1, h2) = chd::split_key(hash);
         let disps_idx = fast_reduct32(g, disps_len).try_into().unwrap();
         let disp = self.disps.index(disps_idx);
         let d0 = (disp >> 32) as u32;
