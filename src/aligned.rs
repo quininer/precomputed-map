@@ -12,6 +12,28 @@ pub struct AlignedArray<'data, const B: usize, T> {
     _phantom: PhantomData<T>
 }
 
+impl<const B: usize> AlignedArray<'_, B, u16> {
+    pub const LEN: usize = {
+        if B % mem::size_of::<u16>() != 0 {
+            panic!();
+        }
+
+        B / mem::size_of::<u16>()
+    };
+    
+    pub fn get(&self, index: usize) -> Option<u16> {
+        let size = mem::size_of::<u16>();
+        let index = index * size;
+
+        if B >= index + size {
+            let buf = self.bytes[index..][..size].try_into().unwrap();
+            Some(u16::from_le_bytes(buf))
+        } else {
+            None
+        }
+    }
+}
+
 impl<const B: usize> AlignedArray<'_, B, u32> {
     pub const LEN: usize = {
         if B % mem::size_of::<u32>() != 0 {

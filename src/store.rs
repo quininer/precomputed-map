@@ -121,6 +121,19 @@ impl<
 impl<
     'data,
     const B: usize,
+> AccessList<'data> for AlignedArray<'data, B, u16> {
+    type Item = u16;
+
+    const LEN: usize = <AlignedArray<'data, B, u16>>::LEN;
+
+    fn index(&self, index: usize) -> Self::Item {
+        self.get(index).unwrap()
+    }
+}
+
+impl<
+    'data,
+    const B: usize,
 > AccessList<'data> for AlignedArray<'data, B, u32> {
     type Item = u32;
 

@@ -3,14 +3,14 @@
 #[cfg(feature = "builder")]
 pub mod builder;
 mod store;
-mod chd;
+mod phf;
 mod aligned;
 
 use core::borrow::Borrow;
 use core::hash::Hash;
 use core::marker::PhantomData;
 use store::AccessList;
-pub use chd::{ HashOne, HashOne128 };
+pub use phf::{ HashOne, U64Hasher };
 
 pub trait MapStore<'data> {
     type Key: 'data;
@@ -83,10 +83,10 @@ where
     where
         Q: Hash + ?Sized
     {
-        let size: u32 = D::LEN.try_into().unwrap();
+        let size: u64 = D::LEN.try_into().unwrap();
 
-        let hash = H::hash_one(self.seed, key) as u32;
-        let index = fast_reduct32(hash, size);
+        let hash = H::hash_one(self.seed, key);
+        let index = fast_reduct64(hash, size);
         index.try_into().unwrap()
     }
 
@@ -106,26 +106,28 @@ where
 
 /// Medium map
 ///
-/// 1024..
-pub struct MediumMap<'data, A, D, H> {
+/// 1024..10M
+pub struct MediumMap<'data, P, R, D, H> {
     seed: u64,
-    disps: A,
+    pilots: P,
+    remap: R,
     data: D,
-    _phantom: PhantomData<&'data (A, D, H)>
+    _phantom: PhantomData<&'data (P, D, R, H)>
 }
 
-impl<'data, A, D, H> MediumMap<'data, A, D, H>
+impl<'data, P, R, D, H> MediumMap<'data, P, R, D, H>
 where
-    A: AccessList<'data, Item = u64>,
+    P: AccessList<'data, Item = u8>,
+    R: AccessList<'data, Item = u32>,
     D: MapStore<'data>,
     D::Key: Hash + Eq + Copy,
-    H: HashOne128
+    H: HashOne
 {
-    pub const fn new(seed: u64, disps: A, data: D)
-        -> MediumMap<'data, A, D, H>
+    pub const fn new(seed: u64, pilots: P, remap: R, data: D)
+        -> MediumMap<'data, P, R, D, H>
     {
         MediumMap {
-            seed, disps, data,
+            seed, pilots, remap, data,
             _phantom: PhantomData
         }
     }
@@ -134,19 +136,18 @@ where
     where
         Q: Hash + ?Sized
     {
-        let len = D::LEN.try_into().unwrap();
-        let disps_len: u32 = A::LEN.try_into().unwrap();
+        let pilots_len: u64 = P::LEN.try_into().unwrap();
+        let slots_len: u64 = 0;
         
-        let hash = H::hash_one128(self.seed, key);
+        let hash = H::hash_one(self.seed, key);
+        let bucket: usize = fast_reduct64(hash, pilots_len).try_into().unwrap();
+        let pilot = self.pilots.index(bucket);
+        let index: usize = fast_reduct64(hash ^ u64::from(pilot), slots_len).try_into().unwrap();
 
-        let (g, h1, h2) = chd::split_key(hash);
-        let disps_idx = fast_reduct32(g, disps_len).try_into().unwrap();
-        let disp = self.disps.index(disps_idx);
-        let d0 = (disp >> 32) as u32;
-        let d1 = disp as u32;
-
-        let index = chd::displace(h1, h2, d0, d1);
-        fast_reduct32(index, len).try_into().unwrap()
+        match index.checked_sub(D::LEN) {
+            None => index,
+            Some(offset) => self.remap.index(offset).try_into().unwrap()
+        }
     }
 
     pub fn get<Q>(&self, key: &Q) -> Option<D::Value>
@@ -164,6 +165,6 @@ where
 }
 
 // https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
-fn fast_reduct32(x: u32, limit: u32) -> u32 {
-    ((x as u64) * (limit as u64) >> 32) as u32
+fn fast_reduct64(x: u64, limit: u64) -> u64 {
+    ((x as u128) * (limit as u128) >> 64) as u64
 }

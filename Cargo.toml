@@ -8,4 +8,4 @@ rayon = { version = "1", optional = true }
 
 [features]
 default = [ "builder" ]
-builder = [ "rayon"]
+builder = [ "rayon" ]
