@@ -1,5 +1,9 @@
+#[cfg(test)]
+mod tests;
+
 use std::cmp;
-use crate::{ phf, fast_reduct64 };
+use std::collections::{ HashSet, HashMap, BTreeMap };
+use crate::{ phf, fast_reduct32, low, high };
 
 
 pub struct MapBuilder<'a, K> {
@@ -79,11 +83,13 @@ impl<'a, K> MapBuilder<'a, K> {
     }
 }
 
+#[derive(Debug)]
 pub struct MapOutput {
     kind: MapKind,
     index: Box<[usize]>
 }
 
+#[derive(Debug)]
 pub enum MapKind {
     Tiny,
     Small(u64),
@@ -127,7 +133,7 @@ fn build_small<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
         hashes.extend(builder.keys.iter().map(|v| hash(seed, v)));
 
         for (idx, &v) in hashes.iter().enumerate() {
-            let new_idx = fast_reduct64(v, keys_len.into()) as usize;
+            let new_idx = fast_reduct32(high(v) ^ low(v), keys_len) as usize;
 
             if map[new_idx].replace(idx).is_some() {
                 seed = next_seed(init_seed, c);
@@ -155,6 +161,10 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
     struct Slot {
         bucket: u32,
         keys_idx: usize,
+    }
+
+    fn reduct(hashes: &[u64], idx: usize, hp: u64, slots_len: u32) -> u32 {
+        fast_reduct32(high(hashes[idx]) ^ high(hp) ^ low(hp), slots_len)
     }
     
     let hash = builder.hash.as_ref()?;
@@ -192,13 +202,15 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
     let mut slots = (0..slots_len).map(|_| None).collect::<Box<[_]>>();
     let mut hashes = vec![0; builder.keys.len()].into_boxed_slice();
     let mut stack = Vec::new();
-    let mut values_to_add = Vec::new();
+
+    // Since the number is small enough, we just use naive search
     let mut recent = Vec::new();
+    let mut values_to_add = Vec::new();
+    let mut already_scored = Vec::new();
 
     'search: for c in 0.. {
         buckets.iter_mut().for_each(|bucket| bucket.slots.clear());
         pilots.iter_mut().for_each(|p| *p = 0);
-        recent.clear();
 
         hashes.iter_mut()
             .enumerate()
@@ -206,12 +218,14 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
                 *v = hash(seed, &builder.keys[idx]);
             });
 
+        // println!("search (round {}) with {:x}", c, seed);
+
         for (idx, &v) in hashes.iter().enumerate() {
-            let bucket_idx = fast_reduct64(v, buckets_len.into()) as usize;
+            let bucket_idx = fast_reduct32(low(v), buckets_len) as usize;
             buckets[bucket_idx].slots.push(idx);
         }
 
-        order.sort_by_key(|&bucket_idx| cmp::Reverse(buckets[bucket_idx as usize].slots.len()));
+        order.sort_unstable_by_key(|&bucket_idx| cmp::Reverse(buckets[bucket_idx as usize].slots.len()));
 
         for &new_bucket_idx in &order {
             if buckets[new_bucket_idx as usize].slots.is_empty() {
@@ -219,14 +233,23 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
                 continue
             }
             
+            recent.clear();
             stack.clear();
             stack.push(new_bucket_idx);
 
-            'bucket: while let Some(bucket_idx) = stack.pop() {
+            // println!("[{}/{}] bucket {:?} with {:x}", num, order.len(), new_bucket_idx, seed);
+
+            'bucket: while let Some(bucket_idx) = {
+                // big bucket first
+                stack.sort_unstable_by_key(|&bucket_idx| buckets[bucket_idx as usize].slots.len());
+                stack.pop()
+            } {
                 // Do not evict buckets that have already been evicted.
                 //
                 // this is simpler than the original ptr-hash code, but can completely prevent cycles.
                 recent.push(bucket_idx);
+
+                // println!("bucket or evict {:?}", bucket_idx);
 
                 // fast search pilot
                 'pilot: for p in 0..=u8::MAX {
@@ -237,20 +260,20 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
                     for (keys_idx, slot_idx) in buckets[bucket_idx as usize]
                         .slots
                         .iter()
-                        .map(|&keys_idx| (keys_idx, fast_reduct64(hashes[keys_idx] ^ hp, slots_len.into())))
+                        .map(|&keys_idx| (keys_idx, reduct(&hashes, keys_idx, hp, slots_len)))
                     {
                         if slots[slot_idx as usize].is_some()
-                            || values_to_add.iter().any(|(_, prev)| *prev == slot_idx)
+                            || values_to_add.iter().any(|(prev_slot_idx, _)| *prev_slot_idx == slot_idx)
                         {
                             continue 'pilot
                         }
 
-                        values_to_add.push((keys_idx, slot_idx));
+                        values_to_add.push((slot_idx, keys_idx));
                     }
 
                     pilots[bucket_idx as usize] = p;
 
-                    for &(keys_idx, slot_idx) in &values_to_add {
+                    for &(slot_idx, keys_idx) in &values_to_add {
                         slots[slot_idx as usize] = Some(Slot {
                             bucket: bucket_idx,
                             keys_idx 
@@ -265,6 +288,7 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
 
                 'pilot: for p in 0..=u8::MAX {
                     values_to_add.clear();
+                    already_scored.clear();
 
                     // start from a slightly different point, just 42 because we don't like random.
                     let p = p.wrapping_add(0x42);
@@ -273,21 +297,24 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
 
                     for (keys_idx, slot_idx) in buckets[bucket_idx as usize].slots
                         .iter()
-                        .map(|&keys_idx| (keys_idx, fast_reduct64(hashes[keys_idx] ^ hp, slots_len.into())))
+                        .map(|&keys_idx| (keys_idx, reduct(&hashes, keys_idx, hp, slots_len)))
                     {
+                        if values_to_add.iter().any(|(prev_slot_idx, _)| *prev_slot_idx == slot_idx) {
+                            continue 'pilot
+                        }
+                        
                         let new_score = match slots[slot_idx as usize].as_ref() {
                             None => 0,
-                            Some(slot) if
-                                values_to_add.iter().any(|(_, prev)| *prev == slot_idx) 
-                                || recent.contains(&slot.bucket)
-                                => continue 'pilot,
-                            Some(slot) => {
+                            Some(slot) if recent.contains(&slot.bucket) =>
+                                continue 'pilot,
+                            Some(slot) if !already_scored.contains(&slot.bucket) => {
+                                already_scored.push(slot.bucket);
                                 buckets[slot.bucket as usize].slots.len().pow(2)
-                            },
+                            }
+                            Some(_) => 0
                         };
 
-                        values_to_add.push((keys_idx, slot_idx));
-
+                        values_to_add.push((slot_idx, keys_idx));
                         collision_score += new_score;
 
                         if let Some((best_score, _)) = best
@@ -301,10 +328,12 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
 
                     // Since we already checked for a collision-free solution,
                     // the next best is a single collision of size b_len.
-                    if collision_score == buckets[new_bucket_idx as usize].slots.len().pow(2) {
+                    if collision_score == buckets[bucket_idx as usize].slots.len().pow(2) {
                         break
                     }
                 }
+
+                // println!("best pilot {:?}", best);
 
                 let Some((_, p)) = best else {
                     // No available pilot was found, so this seed is abandoned.
@@ -317,7 +346,7 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
 
                 for (keys_idx, slot_idx) in buckets[bucket_idx as usize].slots
                     .iter()
-                    .map(|&keys_idx| (keys_idx, fast_reduct64(hashes[keys_idx] ^ hp, slots_len.into())))
+                    .map(|&keys_idx| (keys_idx, reduct(&hashes, keys_idx, hp, slots_len)))
                 {
                     if let Some(old_slot) = slots[slot_idx as usize]
                         .replace(Slot {
@@ -325,12 +354,18 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
                             keys_idx
                         })
                     {
-                        assert!(!stack.contains(&old_slot.bucket));
+                        assert!(!stack.contains(&old_slot.bucket), "{:?}", (&stack, old_slot.bucket));
                         
                         // Eviction conflict bucket
                         stack.push(old_slot.bucket);
 
-                        for &old_slot_idx in &buckets[old_slot.bucket as usize].slots {
+                        let hp = phf::hash_pilot(seed, pilots[old_slot.bucket as usize]);
+
+                        for old_slot_idx in buckets[old_slot.bucket as usize].slots
+                            .iter()
+                            .map(|&keys_idx| reduct(&hashes, keys_idx, hp, slots_len))
+                            .filter(|&old_slot_idx| old_slot_idx != slot_idx)
+                        {
                             slots[old_slot_idx as usize] = None;
                         }
                     }
@@ -338,21 +373,29 @@ fn build_medium<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
             }
         }
 
-        let remap = Vec::new();
-        let index = slots.iter()
-            .map(|slot| slot.as_ref().unwrap().keys_idx)
-            .collect();
+        let mut index = vec![0; builder.keys.len()].into_boxed_slice();
+        let mut remap = vec![0; slots.len() - index.len()].into_boxed_slice();
+        let mut remap_slots = Vec::new();
 
-        let output = MapOutput {
+        for (slot_idx, slot) in slots.iter().enumerate() {
+            match (slot_idx.checked_sub(index.len()), slot) {
+                (None, Some(slot)) => index[slot_idx] = slot.keys_idx,
+                (None, None) => remap_slots.push(slot_idx),
+                (Some(offset), Some(slot)) => {
+                    let remap_slot = remap_slots.pop().unwrap();
+                    remap[offset] = remap_slot.try_into().unwrap();
+                    index[remap_slot] = slot.keys_idx
+                },
+                (Some(_), None) => ()
+            }
+        }
+
+        return Some(MapOutput {
             kind: MapKind::Medium {
-                seed,
-                pilots,
-                remap: remap.into_boxed_slice()
+                seed, pilots, remap
             },
             index
-        };
-
-        return Some(output);
+        });
     }
 
     // TODO build fail

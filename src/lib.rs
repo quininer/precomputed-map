@@ -83,10 +83,10 @@ where
     where
         Q: Hash + ?Sized
     {
-        let size: u64 = D::LEN.try_into().unwrap();
+        let size: u32 = D::LEN.try_into().unwrap();
 
         let hash = H::hash_one(self.seed, key);
-        let index = fast_reduct64(hash, size);
+        let index = fast_reduct32(high(hash) ^ high(hash), size);
         index.try_into().unwrap()
     }
 
@@ -136,13 +136,14 @@ where
     where
         Q: Hash + ?Sized
     {
-        let pilots_len: u64 = P::LEN.try_into().unwrap();
-        let slots_len: u64 = 0;
+        let pilots_len: u32 = P::LEN.try_into().unwrap();
+        let slots_len: u32 = 0;
         
         let hash = H::hash_one(self.seed, key);
-        let bucket: usize = fast_reduct64(hash, pilots_len).try_into().unwrap();
+        let bucket: usize = fast_reduct32(low(hash), pilots_len).try_into().unwrap();
         let pilot = self.pilots.index(bucket);
-        let index: usize = fast_reduct64(hash ^ u64::from(pilot), slots_len).try_into().unwrap();
+        let pilot_hash = phf::hash_pilot(self.seed, pilot);
+        let index: usize = fast_reduct32(high(hash) ^ high(pilot_hash) ^ low(pilot_hash), slots_len).try_into().unwrap();
 
         match index.checked_sub(D::LEN) {
             None => index,
@@ -165,6 +166,14 @@ where
 }
 
 // https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
-fn fast_reduct64(x: u64, limit: u64) -> u64 {
-    ((x as u128) * (limit as u128) >> 64) as u64
+fn fast_reduct32(x: u32, limit: u32) -> u32 {
+    ((x as u64) * (limit as u64) >> 32) as u32
+}
+
+fn low(v: u64) -> u32 {
+    v as u32
+}
+
+fn high(v: u64) -> u32 {
+    (v >> 32) as u32
 }
