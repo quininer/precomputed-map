@@ -2,9 +2,9 @@
 
 #[cfg(feature = "builder")]
 pub mod builder;
-mod store;
+pub mod store;
+pub mod aligned;
 mod phf;
-mod aligned;
 
 use core::borrow::Borrow;
 use core::hash::Hash;

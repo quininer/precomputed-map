@@ -1,5 +1,11 @@
+use core::marker::PhantomData;
 use crate::MapStore;
 use crate::aligned::AlignedArray;
+
+pub struct StaticSlice<'data, const B: usize, const S: usize, const E: usize> {
+    data: &'data [u8; B],
+    _phantom: PhantomData<(&'data [u8; S], &'data [u8; E])>
+}
 
 pub struct List<'data, const N: usize, T> {
     data: &'data [T; N]
@@ -18,19 +24,31 @@ pub struct Compact<
     data: &'data [u8; DATA],
 }
 
-pub struct CompactStr<
-    'data,
-    SEQ
-> {
-    seq: SEQ,
-    data: &'data str,
-}
+pub struct Indexed<K>(pub K);
 
 pub trait AccessList<'data> {
     type Item: 'data;
     const LEN: usize;
 
     fn index(&self, index: usize) -> Self::Item;
+}
+
+impl<'data, K> MapStore<'data> for Indexed<K>
+where
+    K: AccessList<'data>
+{
+    type Key = K::Item;
+    type Value = usize;
+
+    const LEN: usize = K::LEN;
+
+    fn get_key(&self, index: usize) -> Self::Key {
+        self.0.index(index)
+    }
+
+    fn get_value(&self, index: usize) -> Self::Value {
+        index
+    }
 }
 
 impl<'data, K, V> MapStore<'data> for (K, V)
@@ -81,27 +99,6 @@ impl<
     SEQ: AccessList<'data, Item = u32>,
 > AccessList<'data> for Compact<'data, DATA, SEQ> {
     type Item = &'data [u8];
-
-    const LEN: usize = SEQ::LEN;
-
-    fn index(&self, index: usize) -> Self::Item {
-        let start: usize = index.checked_sub(1)
-            .map(|index| self.seq.index(index))
-            .unwrap_or_default()
-            .try_into()
-            .unwrap();
-        let end: usize = self.seq.index(index)
-            .try_into()
-            .unwrap();
-        &self.data[start..end]
-    }
-}
-
-impl<
-    'data,
-    SEQ: AccessList<'data, Item = u32>,
-> AccessList<'data> for CompactStr<'data, SEQ> {
-    type Item = &'data str;
 
     const LEN: usize = SEQ::LEN;
 
