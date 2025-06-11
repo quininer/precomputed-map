@@ -2,9 +2,8 @@
 mod tests;
 mod build;
 
-use std::{ cmp, fmt };
+use std::{ fs, cmp, fmt };
 use std::io::{ self, Write };
-use std::ops::Range;
 
 
 pub struct MapBuilder<'a, K> {
@@ -98,6 +97,7 @@ pub enum MapKind {
     Small(u64),
     Medium {
         seed: u64,
+        slots: u32,
         pilots: Box<[u8]>,
         remap: Box<[u32]>,
     }
@@ -111,29 +111,56 @@ impl fmt::Display for BuildFailed {
 
 impl std::error::Error for BuildFailed {}
 
+pub struct ReferenceId(usize);
+
 #[derive(Debug)]
 pub struct MapOutput {
     pub kind: MapKind,
     pub index: Box<[usize]>
 }
 
-pub struct SeqOutput {
-    //
-}
-
-pub struct OutputBuilder<'w> {
+pub struct OutputBuilder {
+    name: String,
+    hash: String,
     list: Vec<OutputEntry>,
-    bytes_writer: CountWriter<&'w mut dyn io::Write>,
-    u32seq_writer: CountWriter<&'w mut dyn io::Write>,
+    bytes_writer: CountWriter<fs::File>,
+    u32seq_writer: CountWriter<fs::File>,
 }
 
-enum OutputEntry {
-    Tiny,
-    Small(u64),
+struct OutputEntry {
+    name: Option<String>,
+    kind: OutputKind
+}
+
+enum OutputKind {
+    Custom {
+        r#type: String,
+        value: String,
+    },
+    U8Seq {
+        offset: usize,
+        len: usize
+    },
+    BytesSeq {
+        offset: usize,
+        len: usize,
+        index: ReferenceId
+    },
+    U32Seq {
+        offset: usize,
+        len: usize
+    },
+    Tiny(ReferenceId),
+    Small {
+        seed: u64,
+        data: ReferenceId
+    },
     Medium {
         seed: u64,
-        pilots: Range<usize>,
-        remap: Range<usize>,
+        slots: u32,
+        pilots: ReferenceId,
+        remap: ReferenceId,
+        data: ReferenceId
     }
 }
 
@@ -143,51 +170,295 @@ struct CountWriter<W> {
 }
 
 impl MapOutput {
-    pub fn output(&self, builder: &mut OutputBuilder<'_>)
-        -> io::Result<()>
+    pub fn push_to(&self, name: String, data: ReferenceId, builder: &mut OutputBuilder)
+        -> io::Result<ReferenceId>
     {
+        match &self.kind {
+            MapKind::Tiny => {
+                let id = builder.list.len();
+                builder.list.push(OutputEntry {
+                    name: Some(name),
+                    kind: OutputKind::Tiny(data)
+                });
+                Ok(ReferenceId(id))
+            },
+            MapKind::Small(seed) => {
+                let id = builder.list.len();
+                builder.list.push(OutputEntry {
+                    name: Some(name),
+                    kind: OutputKind::Small { seed: *seed, data }
+                });
+                Ok(ReferenceId(id))                
+            },
+            MapKind::Medium { seed, slots, pilots, remap } => {
+                let pilots = {
+                    let offset = builder.bytes_writer.count;
+                    builder.bytes_writer.write_all(&pilots)?;
+                    let len = builder.bytes_writer.count - offset;
+
+                    let id = builder.list.len();
+                    builder.list.push(OutputEntry {
+                        name: None,
+                        kind: OutputKind::U8Seq { offset, len }
+                    });
+                    ReferenceId(id)
+                };
+
+                let remap = {
+                    let offset = builder.u32seq_writer.count;
+                    for &n in remap {
+                        builder.u32seq_writer.write_all(&n.to_le_bytes())?;
+                    }
+                    let len = builder.u32seq_writer.count - offset;
+
+                    let id = builder.list.len();
+                    builder.list.push(OutputEntry {
+                        name: None,
+                        kind: OutputKind::U32Seq { offset, len }
+                    });
+                    ReferenceId(id)                    
+                };
+
+                let id = builder.list.len();
+                builder.list.push(OutputEntry {
+                    name: Some(name),
+                    kind: OutputKind::Medium {
+                        seed: *seed,
+                        slots: *slots,
+                        pilots, remap, data
+                    }
+                });
+                Ok(ReferenceId(id))
+            },
+        }
+    }
+}
+
+impl OutputBuilder {
+    pub fn new<'w>(
+        name: String,
+        hash: String,
+        bytes_writer: fs::File,
+        u32seq_writer: fs::File
+    ) -> OutputBuilder {
+        OutputBuilder {
+            name, hash,
+            list: Vec::new(),
+            bytes_writer: CountWriter { writer: bytes_writer, count: 0 },
+            u32seq_writer: CountWriter { writer: u32seq_writer, count: 0 },
+        }
+    }
+    
+    pub fn create_custom(&mut self, r#type: String, value: String) -> ReferenceId {
+        let id = self.list.len();
+        self.list.push(OutputEntry {
+            name: None,
+            kind: OutputKind::Custom { r#type, value }
+        });
+        ReferenceId(id)
+    }
+
+    pub fn create_bytes_seq<SEQ, B>(&mut self, name: String, seq: SEQ)
+        -> io::Result<ReferenceId>
+    where
+        SEQ: Iterator<Item = B>,
+        B: AsRef<[u8]>
+    {
+        let offset = self.bytes_writer.count;
+        let mut count = 0;
+        let mut list = Vec::new();
+        for buf in seq {
+            let buf = buf.as_ref();
+            self.bytes_writer.write_all(buf)?;
+
+            let len: u32 = buf.len().try_into().unwrap();
+            count += len;
+            list.push(count);
+        }
+        let len = self.bytes_writer.count - offset;
+        let index = self.create_u32_seq(format!("{}_INDEX", name), &list)?;
+
+        let id = self.list.len();
+        self.list.push(OutputEntry {
+            name: Some(name),
+            kind: OutputKind::BytesSeq { offset, len, index }
+        });
+        Ok(ReferenceId(id))
+    }
+
+    pub fn create_u32_seq(&mut self, name: String, seq: &[u32]) -> io::Result<ReferenceId> {
+        let offset = self.u32seq_writer.count;
+        for n in seq {
+            self.u32seq_writer.write_all(&n.to_le_bytes())?;
+        }
+        let len = self.u32seq_writer.count - offset;
+
+        let id = self.list.len();
+        self.list.push(OutputEntry {
+            name: Some(name),
+            kind: OutputKind::U32Seq { offset, len }
+        });
+        Ok(ReferenceId(id))        
+    }
+
+    pub fn build(self, writer: &mut dyn io::Write) -> io::Result<()> {
+        struct ReferenceEntry {
+            r#type: String,
+            value: String
+        }
+
+        if self.bytes_writer.count != 0 {
+            writeln!(writer,
+                r#"const {name}_BYTES: &[u8; {count}] = include_bytes!("{name}.bytes")"#,
+                count = self.bytes_writer.count,
+                name = self.name,
+            )?;
+        }
+
+        if self.u32seq_writer.count != 0 {
+            writeln!(writer,
+                "\
+                const {name}_U32SEQ: &[u8; {count}] = static {name}_BYTES_U32SEQ: static_datamap::aligned::AlignedBytes<{count}, u32> = {{
+                        static_datamap::aligned::AlignedBytes {{
+                            align: [],
+                            bytes: *include_bytes!(\"{name}.u32seq\")
+                        }};
+
+                    &{name}_BYTES_U32SEQ.bytes
+                }};\
+                ",
+                count = self.u32seq_writer.count,
+                name = self.name,
+            )?;
+        }
+
+        let bytes = format!("{}_BYTES", self.name);
+        let u32seq = format!("{}_U32SEQ", self.name);
+        let mut list: Vec<ReferenceEntry> = Vec::with_capacity(self.list.len());
+
+        for entry in &self.list {
+            let entry = match &entry.kind {
+                OutputKind::Custom { r#type, value } => ReferenceEntry {
+                    r#type: r#type.clone(),
+                    value: value.clone()
+                },
+                OutputKind::U8Seq { offset, len } => {
+                    let ty = format!(
+                        "static_datamap::store::ConstSlice<'static, {}, {}, {}>",
+                        self.bytes_writer.count,
+                        offset,
+                        len
+                    );
+                    let val = format!("<{}>::new({})", ty, bytes);
+
+                    if let Some(entry_name) = entry.name.as_ref() {
+                        writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
+                        ReferenceEntry { r#type: ty, value: entry_name.clone() }
+                    } else {
+                        ReferenceEntry { r#type: ty, value: val }
+                    }
+                },
+                OutputKind::U32Seq { offset, len } => {
+                    let data_ty = format!(
+                        "static_datamap::store::ConstSlice<'static, {}, {}, {}>",
+                        self.u32seq_writer.count,
+                        offset,
+                        len
+                    );
+                    let ty = format!(
+                        "static_datamap::aligned::AlignedArray<{}, u32, {}>",
+                        len,
+                        data_ty
+                    );
+                    let data_val = format!("<{}>::new({})", data_ty, u32seq);
+                    let val = format!("<{}>::new({})", ty, data_val);
+
+                    if let Some(entry_name) = entry.name.as_ref() {
+                        writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
+                        ReferenceEntry { r#type: ty, value: entry_name.clone() }
+                    } else {
+                        ReferenceEntry { r#type: ty, value: val }
+                    }
+                },
+                OutputKind::BytesSeq { offset, len, index } => {
+                    let ty = format!(
+                        "static_datamap::seq::CompactSeq<'static, {}, {}, {}, {}>",
+                        self.bytes_writer.count,
+                        offset,
+                        len,
+                        &list[index.0].r#type
+                    );
+                    let val = format!(
+                        "<{}>::new({}, static_datamap::store::ConstSlice::new({}))",
+                        ty,
+                        &list[index.0].value,
+                        bytes
+                    );
+
+                    let entry_name = entry.name.as_ref().unwrap();
+                    writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
+                    ReferenceEntry { r#type: ty, value: entry_name.clone() }                    
+                },
+                OutputKind::Tiny(data) => {
+                    let ty = format!(
+                        "static_datamap::TinyMap<'static, {}>",
+                        &list[data.0].r#type
+                    );
+                    let val = format!(
+                        "<{}>::new({})",
+                        ty,
+                        &list[data.0].value,
+                    );
+
+                    let entry_name = entry.name.as_ref().unwrap();
+                    writeln!(writer, "static {}: {} = {};", entry_name, ty, val)?;
+                    ReferenceEntry { r#type: ty, value: entry_name.clone() }
+                },
+                OutputKind::Small { seed, data } => {
+                    let ty = format!(
+                        "static_datamap::SmallMap<'static, {}, {}>",
+                        &list[data.0].r#type,
+                        self.hash,
+                    );
+                    let val = format!(
+                        "<{}>::new({}, {})",
+                        ty,
+                        seed,
+                        &list[data.0].value,
+                    );
+
+                    let entry_name = entry.name.as_ref().unwrap();
+                    writeln!(writer, "static {}: {} = {};", entry_name, ty, val)?;
+                    ReferenceEntry { r#type: ty, value: entry_name.clone() }
+                },
+                OutputKind::Medium { seed, slots, pilots, remap, data } => {
+                    let ty = format!(
+                        "static_datamap::MediumMap<'static, {}, {}, {}, {}>",
+                        &list[pilots.0].r#type,
+                        &list[remap.0].r#type,
+                        &list[data.0].r#type,
+                        self.hash,
+                    );
+                    let val = format!(
+                        "<{}>::new({}, {}, {}, {}, {})",
+                        ty,
+                        seed,
+                        slots,
+                        &list[pilots.0].value,
+                        &list[remap.0].value,
+                        &list[data.0].value,
+                    );
+
+                    let entry_name = entry.name.as_ref().unwrap();
+                    writeln!(writer, "static {}: {} = {};", entry_name, ty, val)?;
+                    ReferenceEntry { r#type: ty, value: entry_name.clone() }
+                },
+            };
+
+            list.push(entry);
+        }
+
         todo!()
-    //     match &self.kind {
-    //         MapKind::Tiny => writeln!(writer.code,
-    //             "pub static MAP: static_datamap::TinyMap<'static, {}> = static_datamap::TinyMap::new({});",
-    //             config.data_type,
-    //             config.data
-    //         )?,
-    //         MapKind::Small(seed) => writeln!(writer.code,
-    //             "pub static MAP: static_datamap::SmallMap<'static, {}, {}> = \
-    //             static_datamap::SmallMap::new({}, {});",
-    //             config.data_type,
-    //             config.hash_type,
-    //             seed,
-    //             config.data
-    //         )?,
-    //         MapKind::Medium { seed, pilots, remap } => {
-    //             let pilots_start = writer.bytes.count;
-    //             writer.bytes.write_all(&pilots)?;
-    //             let pilots = pilots_start..writer.bytes.count;
-
-    //             let remap_start = writer.u32seq.count;
-    //             for &n in remap {
-    //                 writer.u32seq.write_all(&n.to_le_bytes())?;
-    //             }
-    //             let remap = remap_start..writer.u32seq.count;
-                
-    //             writeln!(writer.code,
-    //                 "pub static MAP: static_datamap::MediumMap<'static, {}, {}, {}, {}> = \
-    //                 static_datamap::MediumMap::new({}, {}, {}, {});",
-    //                 "pilots",
-    //                 "remap",
-    //                 config.data_type,
-    //                 config.hash_type,
-    //                 seed,
-    //                 "pilots",
-    //                 "remap",
-    //                 config.data
-    //             )?                
-    //         },
-    //     }
-
-    //     Ok(())
     }
 }
 

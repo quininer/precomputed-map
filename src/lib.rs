@@ -3,14 +3,19 @@
 #[cfg(feature = "builder")]
 pub mod builder;
 pub mod store;
+pub mod seq;
 pub mod aligned;
 mod phf;
 
 use core::borrow::Borrow;
 use core::hash::Hash;
 use core::marker::PhantomData;
-use store::AccessList;
 pub use phf::{ HashOne, U64Hasher };
+
+
+pub trait AsData<'data, const N: usize> {
+    fn as_data(&self) -> &'data [u8; N];
+}
 
 pub trait MapStore<'data> {
     type Key: 'data;
@@ -20,6 +25,13 @@ pub trait MapStore<'data> {
     
     fn get_key(&self, index: usize) -> Self::Key;
     fn get_value(&self, index: usize) -> Self::Value;
+}
+
+pub trait AccessSeq<'data> {
+    type Item: 'data;
+    const LEN: usize;
+
+    fn index(&self, index: usize) -> Self::Item;
 }
 
 pub trait Searchable<'data>: MapStore<'data> {
@@ -109,6 +121,7 @@ where
 /// 1024..10M
 pub struct MediumMap<'data, P, R, D, H> {
     seed: u64,
+    slots: u32,
     pilots: P,
     remap: R,
     data: D,
@@ -117,17 +130,17 @@ pub struct MediumMap<'data, P, R, D, H> {
 
 impl<'data, P, R, D, H> MediumMap<'data, P, R, D, H>
 where
-    P: AccessList<'data, Item = u8>,
-    R: AccessList<'data, Item = u32>,
+    P: AccessSeq<'data, Item = u8>,
+    R: AccessSeq<'data, Item = u32>,
     D: MapStore<'data>,
     D::Key: Hash + Eq + Copy,
     H: HashOne
 {
-    pub const fn new(seed: u64, pilots: P, remap: R, data: D)
+    pub const fn new(seed: u64, slots: u32, pilots: P, remap: R, data: D)
         -> MediumMap<'data, P, R, D, H>
     {
         MediumMap {
-            seed, pilots, remap, data,
+            seed, slots, pilots, remap, data,
             _phantom: PhantomData
         }
     }
@@ -137,7 +150,7 @@ where
         Q: Hash + ?Sized
     {
         let pilots_len: u32 = P::LEN.try_into().unwrap();
-        let slots_len: u32 = 0;
+        let slots_len: u32 = self.slots;
         
         let hash = H::hash_one(self.seed, key);
         let bucket: usize = fast_reduct32(low(hash), pilots_len).try_into().unwrap();

@@ -294,6 +294,7 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
 
         return Ok(MapOutput {
             kind: MapKind::Medium {
+                slots: slots_len,
                 seed, pilots, remap
             },
             index

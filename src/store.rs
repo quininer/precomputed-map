@@ -1,41 +1,33 @@
 use core::marker::PhantomData;
-use crate::MapStore;
-use crate::aligned::AlignedArray;
+use crate::{ MapStore, AccessSeq, AsData };
 
-pub struct StaticSlice<'data, const B: usize, const S: usize, const E: usize> {
+pub struct ConstSlice<'data, const B: usize, const O: usize, const L: usize> {
     data: &'data [u8; B],
-    _phantom: PhantomData<(&'data [u8; S], &'data [u8; E])>
+    _phantom: PhantomData<([u8; O], [u8; L])>
 }
 
-pub struct List<'data, const N: usize, T> {
-    data: &'data [T; N]
+impl<'data, const B: usize, const O: usize, const L: usize> ConstSlice<'data, B, O, L> {
+    pub const fn new(data: &'data [u8; B]) -> Self {
+        ConstSlice { data, _phantom: PhantomData }
+    }
 }
 
-pub struct RefList<'data, const N: usize, T> {
-    data: &'data [T; N]
-}
-
-pub struct Compact<
+impl<
     'data,
-    const DATA: usize,
-    SEQ
-> {
-    seq: SEQ,
-    data: &'data [u8; DATA],
+    const B: usize,
+    const O: usize,
+    const N: usize,
+> AsData<'data, N> for ConstSlice<'data, B, O, N> {
+    fn as_data(&self) -> &'data [u8; N] {
+        self.data[O..][..N].try_into().unwrap()
+    }
 }
 
 pub struct Indexed<K>(pub K);
 
-pub trait AccessList<'data> {
-    type Item: 'data;
-    const LEN: usize;
-
-    fn index(&self, index: usize) -> Self::Item;
-}
-
 impl<'data, K> MapStore<'data> for Indexed<K>
 where
-    K: AccessList<'data>
+    K: AccessSeq<'data>
 {
     type Key = K::Item;
     type Value = usize;
@@ -53,8 +45,8 @@ where
 
 impl<'data, K, V> MapStore<'data> for (K, V)
 where
-    K: AccessList<'data>,
-    V: AccessList<'data>
+    K: AccessSeq<'data>,
+    V: AccessSeq<'data>
 {
     type Key = K::Item;
     type Value = V::Item;
@@ -70,86 +62,5 @@ where
 
     fn get_value(&self, index: usize) -> Self::Value {
         self.1.index(index)
-    }
-}
-
-impl<'data, const N: usize, T: Copy> AccessList<'data> for List<'data, N, T> {
-    type Item = T;
-
-    const LEN: usize = N;
-
-    fn index(&self, index: usize) -> Self::Item {
-        self.data[index]
-    }
-}
-
-impl<'data, const N: usize, T> AccessList<'data> for RefList<'data, N, T> {
-    type Item = &'data T;
-
-    const LEN: usize = N;
-
-    fn index(&self, index: usize) -> Self::Item {
-        &self.data[index]
-    }
-}
-
-impl<
-    'data,
-    const DATA: usize,
-    SEQ: AccessList<'data, Item = u32>,
-> AccessList<'data> for Compact<'data, DATA, SEQ> {
-    type Item = &'data [u8];
-
-    const LEN: usize = SEQ::LEN;
-
-    fn index(&self, index: usize) -> Self::Item {
-        let start: usize = index.checked_sub(1)
-            .map(|index| self.seq.index(index))
-            .unwrap_or_default()
-            .try_into()
-            .unwrap();
-        let end: usize = self.seq.index(index)
-            .try_into()
-            .unwrap();
-        &self.data[start..end]
-    }
-}
-
-impl<
-    'data,
-    const B: usize,
-> AccessList<'data> for AlignedArray<'data, B, u16> {
-    type Item = u16;
-
-    const LEN: usize = <AlignedArray<'data, B, u16>>::LEN;
-
-    fn index(&self, index: usize) -> Self::Item {
-        self.get(index).unwrap()
-    }
-}
-
-impl<
-    'data,
-    const B: usize,
-> AccessList<'data> for AlignedArray<'data, B, u32> {
-    type Item = u32;
-
-    const LEN: usize = <AlignedArray<'data, B, u32>>::LEN;
-
-    fn index(&self, index: usize) -> Self::Item {
-        self.get(index).unwrap()
-    }
-}
-
-impl<
-    'data,
-    const B: usize,
-> AccessList<'data> for AlignedArray<'data, B, u64> {
-    type Item = u64;
-
-    const LEN: usize = <AlignedArray<'data, B, u64>>::LEN;
-
-    fn index(&self, index: usize) -> Self::Item {
-        self.get(index).unwrap()
     }
 }
