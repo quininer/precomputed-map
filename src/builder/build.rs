@@ -115,6 +115,7 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
     'search: for c in 0.. {
         buckets.iter_mut().for_each(|bucket| bucket.slots.clear());
         pilots.iter_mut().for_each(|p| *p = 0);
+        slots.iter_mut().for_each(|slot| *slot = None);
 
         if let Some(limit) = builder.max_search_limit {
             if c > limit {
@@ -137,7 +138,7 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
 
         for &bucket_idx in &order {
             if buckets[bucket_idx as usize].slots.is_empty() {
-                pilots[bucket_idx as usize] = 0;
+                debug_assert_eq!(pilots[bucket_idx as usize], 0);
                 continue
             }
             
@@ -214,7 +215,7 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
                             Some(slot) if !already_scored.contains(&slot.bucket) => {
                                 already_scored.push(slot.bucket);
                                 buckets[slot.bucket as usize].slots.len().pow(2)
-                            }
+                            },
                             Some(_) => 0
                         };
 
@@ -262,12 +263,12 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
                         stack.push(old_slot.bucket);
 
                         let hp = phf::hash_pilot(seed, pilots[old_slot.bucket as usize]);
-
                         for old_slot_idx in buckets[old_slot.bucket as usize].slots
                             .iter()
                             .map(|&keys_idx| reduct(&hashes, keys_idx, hp, slots_len))
                             .filter(|&old_slot_idx| old_slot_idx != slot_idx)
                         {
+                            debug_assert_eq!(slots[old_slot_idx as usize].as_ref().unwrap().bucket, old_slot.bucket, "{:?}", (bucket_idx, old_slot_idx));
                             slots[old_slot_idx as usize] = None;
                         }
                     }

@@ -3,21 +3,37 @@
 use std::fs;
 use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
+use static_datamap::phf::{ HashOne, U64Hasher };
 
 fn main() {
-    let map = (0u32..10000)
-        .map(|id| (id.to_string(), id ^ 0x42))
-        .collect::<Vec<_>>();
-    let keys = (0..10000).collect::<Vec<usize>>();
+    let mut args = std::env::args().skip(1);
 
+    let map = (0u32..10000)
+        .map(|id| {
+            let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id);
+            let k = format!("{:x}{}", hash, id);
+            let v = (hash as u32) ^ id;
+            (k, v)
+        })
+        .collect::<Vec<_>>();
+
+    match args.next().as_deref() {
+        Some("datamap") => datamap(&map),
+        Some("naive") => naive(&map),
+        _ => panic!()
+    }
+}
+
+
+fn datamap(map: &[(String, u32)]) {
+    let keys = (0..10000).collect::<Vec<usize>>();
+    
     let mapout = static_datamap::builder::MapBuilder::new(&keys)
         .set_seed(17162376839062016489)
         .set_ord(&|&x, &y| std::cmp::Ord::cmp(&map[x].0, &map[y].0))
-        .set_hash(&|seed, &k| {
-            use static_datamap::phf::{ HashOne, U64Hasher };
-
+        .set_hash(&|seed, &k|
             <U64Hasher<DefaultHasher>>::hash_one(seed, map[k].0.as_bytes())
-        })
+        )
         .build()
         .unwrap();
 
@@ -47,10 +63,46 @@ fn main() {
     writeln!(code_file,
         r#"
 fn main() {{
-    let s = "1";
-    let id = STR2ID_MAP.get(s.as_bytes()).unwrap();
-    assert_eq!(id, 1 ^ 0x42);
+    let s = std::hint::black_box({:?});
+    let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
+    assert_eq!(id, {});
 }}
+        "#,
+        map[1].0,
+        map[1].1
+    ).unwrap();
+}
+
+fn naive(map: &[(String, u32)]) {
+    let mut code_file = fs::File::create("examples/str2id_naive.rs").unwrap();
+
+    writeln!(code_file,
+        r#"
+fn main() {{
+    let s = std::hint::black_box({:?});
+    let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
+    assert_eq!(*id, {});    
+}}
+
+use std::collections::HashMap;
+
+static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static [u8], u32>> = std::sync::LazyLock::new(|| [    
+        "#,
+        map[1].0,
+        map[1].1
+    ).unwrap();
+
+    for (k, v) in map {
+        writeln!(code_file, "(\"{}\".as_bytes(), {}),", k, v).unwrap();
+    }
+
+
+    writeln!(code_file,
+        r#"
+]
+    .into_iter()
+    .collect()
+);
         "#
     ).unwrap();
 }

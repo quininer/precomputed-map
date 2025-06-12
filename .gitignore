@@ -2,3 +2,4 @@
 /examples/str2id.bytes
 /examples/str2id.u32seq
 /examples/str2id.rs
+/examples/str2id_naive.rs
