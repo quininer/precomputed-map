@@ -117,7 +117,7 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
         pilots.iter_mut().for_each(|p| *p = 0);
         slots.iter_mut().for_each(|slot| *slot = None);
 
-        if let Some(limit) = builder.max_search_limit {
+        if let Some(limit) = builder.limit {
             if c > limit {
                 break
             }

@@ -93,7 +93,7 @@ static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static [u8], u32>> = std::sync:
     ).unwrap();
 
     for (k, v) in map {
-        writeln!(code_file, "(\"{}\".as_bytes(), {}),", k, v).unwrap();
+        writeln!(code_file, "(\"{}\", {}),", k, v).unwrap();
     }
 
 
@@ -101,6 +101,7 @@ static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static [u8], u32>> = std::sync:
         r#"
 ]
     .into_iter()
+    .map(|(s, id)| (s.as_bytes(), id))
     .collect()
 );
         "#

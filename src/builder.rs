@@ -9,7 +9,7 @@ use std::io::{ self, Write };
 pub struct MapBuilder<'a, K> {
     keys: &'a [K],
     seed: Option<u64>,
-    max_search_limit: Option<u64>,
+    limit: Option<u64>,
     ord: Option<&'a dyn Fn(&K, &K) -> cmp::Ordering>,
     hash: Option<&'a dyn Fn(u64, &K) -> u64>,
     next_seed: &'a dyn Fn(u64, u64) -> u64,
@@ -20,7 +20,7 @@ impl<'a, K> MapBuilder<'a, K> {
     pub fn new(keys: &'a [K]) -> Self {
         MapBuilder {
             keys,
-            max_search_limit: None,
+            limit: None,
             seed: None,
             ord: None,
             hash: None,
@@ -34,8 +34,8 @@ impl<'a, K> MapBuilder<'a, K> {
         }
     }
 
-    pub fn set_max_search_limit(&mut self, limit: Option<u64>) -> &mut Self {
-        self.max_search_limit = limit;
+    pub fn set_limit(&mut self, limit: Option<u64>) -> &mut Self {
+        self.limit = limit;
         self
     }
 
@@ -148,6 +148,11 @@ enum OutputKind {
     },
     U32Seq {
         offset: usize,
+        len: usize
+    },
+    List {
+        item_type: String,
+        value: String,
         len: usize
     },
     Pair {
@@ -277,6 +282,30 @@ impl OutputBuilder {
         });
         ReferenceId(id)
     }
+
+    pub fn create_list<SEQ, T>(&mut self, name: String, item_type: String, seq: SEQ)
+        -> Result<ReferenceId, fmt::Error>
+    where
+        SEQ: Iterator<Item = T> + ExactSizeIterator,
+        T: fmt::Display
+    {
+        use fmt::Write;
+
+        let len = seq.len();        
+        let mut s = String::new();
+        write!(s, "&[")?;
+        for t in seq {
+            write!(s, "{},", t)?;
+        }
+        write!(s, "]")?;
+        
+        let id = self.list.len();
+        self.list.push(OutputEntry {
+            name: Some(name),
+            kind: OutputKind::List { item_type, len, value: s }
+        });
+        Ok(ReferenceId(id))
+    }
     
     pub fn create_pair(&mut self, keys: ReferenceId, values: ReferenceId) -> ReferenceId {
         let id = self.list.len();
@@ -305,7 +334,7 @@ impl OutputBuilder {
             list.push(count);
         }
         let len = self.bytes_writer.count - offset;
-        let index = self.create_u32_seq(format!("{}_INDEX", name), list.iter().copied())?;
+        let index = self.create_u32_seq_raw(None, list.iter().copied())?;
 
         let id = self.list.len();
         self.list.push(OutputEntry {
@@ -315,7 +344,7 @@ impl OutputBuilder {
         Ok(ReferenceId(id))
     }
 
-    pub fn create_u32_seq<SEQ>(&mut self, name: String, seq: SEQ)
+    fn create_u32_seq_raw<SEQ>(&mut self, name: Option<String>, seq: SEQ)
         -> io::Result<ReferenceId>
     where
         SEQ: Iterator<Item = u32>
@@ -328,10 +357,18 @@ impl OutputBuilder {
 
         let id = self.list.len();
         self.list.push(OutputEntry {
-            name: Some(name),
+            name,
             kind: OutputKind::U32Seq { offset, len }
         });
         Ok(ReferenceId(id))        
+    }    
+
+    pub fn create_u32_seq<SEQ>(&mut self, name: String, seq: SEQ)
+        -> io::Result<ReferenceId>
+    where
+        SEQ: Iterator<Item = u32>
+    {
+        self.create_u32_seq_raw(Some(name), seq)
     }
 
     pub fn build(self, writer: &mut dyn io::Write) -> io::Result<()> {
@@ -433,6 +470,17 @@ impl OutputBuilder {
                     let entry_name = entry.name.as_ref().unwrap();
                     writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
                     ReferenceEntry { r#type: ty, value: entry_name.clone() }                    
+                },
+                OutputKind::List { item_type, value, len } => {
+                    let ty = format!("static_datamap::seq::List<'static, {}, {}>", len, item_type);
+                    let val = format!("static_datamap::seq::List({})", value);
+                    
+                    if let Some(entry_name) = entry.name.as_ref() {
+                        writeln!(writer, "const {}: {} = {}", entry_name, ty, val)?;
+                        ReferenceEntry { r#type: ty, value: entry_name.clone() }
+                    } else {
+                        ReferenceEntry { r#type: ty, value: val }
+                    }
                 },
                 OutputKind::Pair { keys, values } => {
                     let ty = format!(
