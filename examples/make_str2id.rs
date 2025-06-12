@@ -26,7 +26,7 @@ fn main() {
 
 
 fn datamap(map: &[(String, u32)]) {
-    let keys = (0..10000).collect::<Vec<usize>>();
+    let keys = (0..map.len()).collect::<Vec<usize>>();
     
     let mapout = static_datamap::builder::MapBuilder::new(&keys)
         .set_seed(17162376839062016489)
@@ -63,9 +63,29 @@ fn datamap(map: &[(String, u32)]) {
     writeln!(code_file,
         r#"
 fn main() {{
+    use std::collections::hash_map::DefaultHasher;
+    use static_datamap::phf::{{ HashOne, U64Hasher }};
+
     let s = std::hint::black_box({:?});
     let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
     assert_eq!(id, {});
+
+    let mut sum = std::time::Duration::new(0, 0);
+
+    for id in 0..STR2ID_STR.len() {{
+        let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id as u32);
+        let k = format!("{{:x}}{{}}", hash, id);
+        let s = std::hint::black_box(k.as_bytes());
+
+        let now = std::time::Instant::now();
+        for _ in 0..10 {{
+            let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
+            std::hint::black_box(id);
+        }}
+        sum += now.elapsed() / 10;
+    }}
+
+    println!("{{:?}}", sum);
 }}
         "#,
         map[1].0,
@@ -79,14 +99,34 @@ fn naive(map: &[(String, u32)]) {
     writeln!(code_file,
         r#"
 fn main() {{
+    use std::collections::hash_map::DefaultHasher;
+    use static_datamap::phf::{{ HashOne, U64Hasher }};
+
     let s = std::hint::black_box({:?});
     let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
-    assert_eq!(*id, {});    
+    assert_eq!(*id, {});
+
+    let mut sum = std::time::Duration::new(0, 0);
+
+    for id in 0..STR2ID_MAP.len() {{
+        let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id as u32);
+        let k = format!("{{:x}}{{}}", hash, id);
+        let s = std::hint::black_box(k.as_bytes());
+
+        let now = std::time::Instant::now();
+        for _ in 0..10 {{
+            let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
+            std::hint::black_box(id);
+        }}
+        sum += now.elapsed() / 10;
+    }}
+
+    println!("{{:?}}", sum);
 }}
 
 use std::collections::HashMap;
 
-static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static [u8], u32>> = std::sync::LazyLock::new(|| [    
+static STR2ID_DATA: &'static [(&'static str, u32)] = &[
         "#,
         map[1].0,
         map[1].1
@@ -99,10 +139,13 @@ static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static [u8], u32>> = std::sync:
 
     writeln!(code_file,
         r#"
-]
-    .into_iter()
-    .map(|(s, id)| (s.as_bytes(), id))
-    .collect()
+];
+
+static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static [u8], u32>> = std::sync::LazyLock::new(||
+    STR2ID_DATA    
+        .into_iter()
+        .map(|(s, id)| (s.as_bytes(), *id))
+        .collect()
 );
         "#
     ).unwrap();

@@ -179,14 +179,17 @@ where
 }
 
 // https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
+#[inline]
 fn fast_reduct32(x: u32, limit: u32) -> u32 {
     ((x as u64) * (limit as u64) >> 32) as u32
 }
 
+#[inline]
 fn low(v: u64) -> u32 {
     v as u32
 }
 
+#[inline]
 fn high(v: u64) -> u32 {
     (v >> 32) as u32
 }

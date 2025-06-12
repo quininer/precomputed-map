@@ -29,11 +29,27 @@ impl<
     }
 }
 
+impl<
+    'data,
+    const B: usize,
+    const O: usize,
+    const L: usize,
+    SEQ,
+> CompactSeq<'data, B, O, L, SEQ>
+where
+    SEQ: AccessSeq<'data, Item = u32>,
+{
+    pub const fn len(&self) -> usize {
+        SEQ::LEN
+    }
+}
+
 impl<'data, const N: usize, T: Copy> AccessSeq<'data> for List<'data, N, T> {
     type Item = T;
 
     const LEN: usize = N;
 
+    #[inline]
     fn index(&self, index: usize) -> Self::Item {
         self.0[index]
     }
@@ -44,6 +60,7 @@ impl<'data, const N: usize, T> AccessSeq<'data> for RefList<'data, N, T> {
 
     const LEN: usize = N;
 
+    #[inline]
     fn index(&self, index: usize) -> Self::Item {
         &self.0[index]
     }
@@ -63,6 +80,7 @@ where
 
     const LEN: usize = SEQ::LEN;
 
+    #[inline]
     fn index(&self, index: usize) -> Self::Item {
         let start: usize = index.checked_sub(1)
             .map(|index| self.seq.index(index))
@@ -88,6 +106,7 @@ where
 
     const LEN: usize = <AlignedArray<B, u32, DATA>>::LEN;
 
+    #[inline]
     fn index(&self, index: usize) -> Self::Item {
         self.get(index).unwrap()
     }

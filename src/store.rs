@@ -18,6 +18,7 @@ impl<
     const O: usize,
     const N: usize,
 > AsData<'data, N> for ConstSlice<'data, B, O, N> {
+    #[inline]
     fn as_data(&self) -> &'data [u8; N] {
         self.data[O..][..N].try_into().unwrap()
     }
@@ -32,6 +33,7 @@ impl<
     type Item = u8;
     const LEN: usize = L;
 
+    #[inline]
     fn index(&self, index: usize) -> Self::Item {
         self.as_data()[index]
     }
@@ -46,10 +48,12 @@ where
 
     const LEN: usize = K::LEN;
 
+    #[inline]
     fn get_key(&self, index: usize) -> Self::Key {
         self.index(index)
     }
 
+    #[inline]
     fn get_value(&self, index: usize) -> Self::Value {
         index
     }
@@ -71,10 +75,12 @@ where
         K::LEN
     };
 
+    #[inline]
     fn get_key(&self, index: usize) -> Self::Key {
         self.0.index(index)
     }
 
+    #[inline]
     fn get_value(&self, index: usize) -> Self::Value {
         self.1.index(index)
     }

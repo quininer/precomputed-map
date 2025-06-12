@@ -29,6 +29,7 @@ where
         AlignedArray { bytes, _phantom: PhantomData }
     }
     
+    #[inline]
     pub fn get(&self, index: usize) -> Option<u32> {
         let size = mem::size_of::<u32>();
         let index = index * size;
