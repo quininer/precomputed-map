@@ -5,12 +5,12 @@ pub mod builder;
 pub mod store;
 pub mod seq;
 pub mod aligned;
-mod phf;
+pub mod phf;
 
 use core::borrow::Borrow;
 use core::hash::Hash;
 use core::marker::PhantomData;
-pub use phf::{ HashOne, U64Hasher };
+use phf::HashOne;
 
 
 pub trait AsData<'data, const N: usize> {

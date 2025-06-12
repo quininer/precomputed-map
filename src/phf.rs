@@ -18,7 +18,7 @@ pub struct U64Hasher<H: Hasher + Default>(PhantomData<H>);
 impl<H: Hasher + Default> HashOne for U64Hasher<H> {
     fn hash_one<T: Hash>(k: u64, v: T) -> u64 {
         let mut h = H::default();
-        k.hash(&mut h);
+        h.write_u64(k);
         v.hash(&mut h);
         h.finish()
     }

@@ -150,6 +150,10 @@ enum OutputKind {
         offset: usize,
         len: usize
     },
+    Pair {
+        keys: ReferenceId,
+        values: ReferenceId
+    },
     Tiny(ReferenceId),
     Small {
         seed: u64,
@@ -170,7 +174,23 @@ struct CountWriter<W> {
 }
 
 impl MapOutput {
-    pub fn push_to(&self, name: String, data: ReferenceId, builder: &mut OutputBuilder)
+    pub fn seed(&self) -> Option<u64> {
+        match &self.kind {
+            MapKind::Tiny => None,
+            MapKind::Small(seed) => Some(*seed),
+            MapKind::Medium { seed, .. } => Some(*seed)
+        }
+    }
+    
+    pub fn reorder<'a: 'i, 'i, T>(&'i self, list: &'a [T])
+        -> impl Iterator<Item = &'a T> + 'i
+    {
+        assert_eq!(self.index.len(), list.len());
+
+        self.index.iter().map(|&idx| &list[idx])
+    }
+    
+    pub fn create_map(&self, name: String, data: ReferenceId, builder: &mut OutputBuilder)
         -> io::Result<ReferenceId>
     {
         match &self.kind {
@@ -257,6 +277,15 @@ impl OutputBuilder {
         });
         ReferenceId(id)
     }
+    
+    pub fn create_pair(&mut self, keys: ReferenceId, values: ReferenceId) -> ReferenceId {
+        let id = self.list.len();
+        self.list.push(OutputEntry {
+            name: None,
+            kind: OutputKind::Pair { keys, values }
+        });
+        ReferenceId(id)
+    }
 
     pub fn create_bytes_seq<SEQ, B>(&mut self, name: String, seq: SEQ)
         -> io::Result<ReferenceId>
@@ -276,7 +305,7 @@ impl OutputBuilder {
             list.push(count);
         }
         let len = self.bytes_writer.count - offset;
-        let index = self.create_u32_seq(format!("{}_INDEX", name), &list)?;
+        let index = self.create_u32_seq(format!("{}_INDEX", name), list.iter().copied())?;
 
         let id = self.list.len();
         self.list.push(OutputEntry {
@@ -286,7 +315,11 @@ impl OutputBuilder {
         Ok(ReferenceId(id))
     }
 
-    pub fn create_u32_seq(&mut self, name: String, seq: &[u32]) -> io::Result<ReferenceId> {
+    pub fn create_u32_seq<SEQ>(&mut self, name: String, seq: SEQ)
+        -> io::Result<ReferenceId>
+    where
+        SEQ: Iterator<Item = u32>
+    {
         let offset = self.u32seq_writer.count;
         for n in seq {
             self.u32seq_writer.write_all(&n.to_le_bytes())?;
@@ -309,31 +342,34 @@ impl OutputBuilder {
 
         if self.bytes_writer.count != 0 {
             writeln!(writer,
-                r#"const {name}_BYTES: &[u8; {count}] = include_bytes!("{name}.bytes")"#,
+                r#"const {name}_BYTES: &[u8; {count}] = include_bytes!("{file}.bytes");"#,
                 count = self.bytes_writer.count,
-                name = self.name,
+                name = self.name.to_ascii_uppercase(),
+                file = self.name
             )?;
         }
 
         if self.u32seq_writer.count != 0 {
             writeln!(writer,
                 "\
-                const {name}_U32SEQ: &[u8; {count}] = static {name}_BYTES_U32SEQ: static_datamap::aligned::AlignedBytes<{count}, u32> = {{
+                const {name}_U32SEQ: &[u8; {count}] = {{
+                    static {name}_BYTES_U32SEQ: static_datamap::aligned::AlignedBytes<{count}, u32> = \
                         static_datamap::aligned::AlignedBytes {{
                             align: [],
-                            bytes: *include_bytes!(\"{name}.u32seq\")
+                            bytes: *include_bytes!(\"{file}.u32seq\")
                         }};
 
                     &{name}_BYTES_U32SEQ.bytes
                 }};\
                 ",
                 count = self.u32seq_writer.count,
-                name = self.name,
+                name = self.name.to_ascii_uppercase(),
+                file = self.name
             )?;
         }
 
-        let bytes = format!("{}_BYTES", self.name);
-        let u32seq = format!("{}_U32SEQ", self.name);
+        let bytes = format!("{}_BYTES", self.name.to_ascii_uppercase());
+        let u32seq = format!("{}_U32SEQ", self.name.to_ascii_uppercase());
         let mut list: Vec<ReferenceEntry> = Vec::with_capacity(self.list.len());
 
         for entry in &self.list {
@@ -389,8 +425,7 @@ impl OutputBuilder {
                         &list[index.0].r#type
                     );
                     let val = format!(
-                        "<{}>::new({}, static_datamap::store::ConstSlice::new({}))",
-                        ty,
+                        "static_datamap::seq::CompactSeq::new({}, static_datamap::store::ConstSlice::new({}))",
                         &list[index.0].value,
                         bytes
                     );
@@ -399,6 +434,20 @@ impl OutputBuilder {
                     writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
                     ReferenceEntry { r#type: ty, value: entry_name.clone() }                    
                 },
+                OutputKind::Pair { keys, values } => {
+                    let ty = format!(
+                        "({}, {})",
+                        &list[keys.0].r#type,
+                        &list[values.0].r#type,
+                    );
+                    let val = format!(
+                        "({}, {})",
+                        &list[keys.0].value,
+                        &list[values.0].value,
+                    );
+                    
+                    ReferenceEntry { r#type: ty, value: val }                    
+                }
                 OutputKind::Tiny(data) => {
                     let ty = format!(
                         "static_datamap::TinyMap<'static, {}>",
@@ -440,8 +489,7 @@ impl OutputBuilder {
                         self.hash,
                     );
                     let val = format!(
-                        "<{}>::new({}, {}, {}, {}, {})",
-                        ty,
+                        "static_datamap::MediumMap::new({}, {}, {}, {}, {})",
                         seed,
                         slots,
                         &list[pilots.0].value,
@@ -458,7 +506,7 @@ impl OutputBuilder {
             list.push(entry);
         }
 
-        todo!()
+        Ok(())
     }
 }
 

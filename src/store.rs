@@ -23,9 +23,21 @@ impl<
     }
 }
 
-pub struct Indexed<K>(pub K);
+impl<
+    'data,
+    const B: usize,
+    const O: usize,
+    const L: usize,
+> AccessSeq<'data> for ConstSlice<'data, B, O, L> {
+    type Item = u8;
+    const LEN: usize = L;
 
-impl<'data, K> MapStore<'data> for Indexed<K>
+    fn index(&self, index: usize) -> Self::Item {
+        self.as_data()[index]
+    }
+}
+
+impl<'data, K> MapStore<'data> for K
 where
     K: AccessSeq<'data>
 {
@@ -35,7 +47,7 @@ where
     const LEN: usize = K::LEN;
 
     fn get_key(&self, index: usize) -> Self::Key {
-        self.0.index(index)
+        self.index(index)
     }
 
     fn get_value(&self, index: usize) -> Self::Value {
@@ -52,7 +64,10 @@ where
     type Value = V::Item;
 
     const LEN: usize = {
-        [(); 0][K::LEN - V::LEN];
+        if K::LEN != V::LEN {
+            panic!();
+        }
+
         K::LEN
     };
 
