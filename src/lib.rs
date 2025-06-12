@@ -98,7 +98,7 @@ where
         let size: u32 = D::LEN.try_into().unwrap();
 
         let hash = H::hash_one(self.seed, key);
-        let index = fast_reduct32(high(hash) ^ high(hash), size);
+        let index = fast_reduct32(high(hash) ^ low(hash), size);
         index.try_into().unwrap()
     }
 
