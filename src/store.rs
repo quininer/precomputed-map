@@ -3,8 +3,10 @@ use core::marker::PhantomData;
 use crate::seq::List;
 
 
-pub trait AsData<'data, const N: usize> {
-    fn as_data(&self) -> &'data [u8; N];
+pub trait AsData {
+    type Data;
+    
+    fn as_data(&self) -> Self::Data;
 }
 
 pub trait MapStore<'data> {
@@ -32,15 +34,15 @@ pub trait Searchable<'data>: MapStore<'data> {
     ;
 }
 
-pub struct ConstSlice<'data, const B: usize, const O: usize, const L: usize> {
-    data: &'data [u8; B],
+pub struct ConstSlice<'data, const O: usize, const L: usize, B: ?Sized> {
+    data: &'data B,
     _phantom: PhantomData<([u8; O], [u8; L])>
 }
 
 pub struct Ordered<D>(pub D);
 
-impl<'data, const B: usize, const O: usize, const L: usize> ConstSlice<'data, B, O, L> {
-    pub const fn new(data: &'data [u8; B]) -> Self {
+impl<'data, const O: usize, const L: usize, B: ?Sized> ConstSlice<'data, O, L, B> {
+    pub const fn new(data: &'data B) -> Self {
         ConstSlice { data, _phantom: PhantomData }
     }
 }
@@ -50,9 +52,24 @@ impl<
     const B: usize,
     const O: usize,
     const N: usize,
-> AsData<'data, N> for ConstSlice<'data, B, O, N> {
+> AsData for ConstSlice<'data, O, N, [u8; B]> {
+    type Data = &'data [u8; N];
+    
     #[inline]
     fn as_data(&self) -> &'data [u8; N] {
+        self.data[O..][..N].try_into().unwrap()
+    }
+}
+
+impl<
+    'data,
+    const O: usize,
+    const N: usize,
+> AsData for ConstSlice<'data, O, N, str> {
+    type Data = &'data str;
+    
+    #[inline]
+    fn as_data(&self) -> &'data str {
         self.data[O..][..N].try_into().unwrap()
     }
 }
@@ -62,7 +79,7 @@ impl<
     const B: usize,
     const O: usize,
     const L: usize,
-> AccessSeq<'data> for ConstSlice<'data, B, O, L> {
+> AccessSeq<'data> for ConstSlice<'data, O, L, [u8; B]> {
     type Item = u8;
     const LEN: usize = L;
 

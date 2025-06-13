@@ -8,23 +8,23 @@ pub struct RefList<'data, const N: usize, T>(pub &'data [T; N]);
 
 pub struct CompactSeq<
     'data,
-    const B: usize,
     const O: usize,
     const L: usize,
     SEQ,
+    BUF: ?Sized,
 > {
     seq: SEQ,
-    data: ConstSlice<'data, B, O, L>,
+    data: ConstSlice<'data, O, L, BUF>,
 }
 
 impl<
     'data,
-    const B: usize,
     const O: usize,
     const L: usize,
     SEQ,
-> CompactSeq<'data, B, O, L, SEQ> {
-    pub const fn new(seq: SEQ, data: ConstSlice<'data, B, O, L>) -> Self {
+    BUF: ?Sized,
+> CompactSeq<'data, O, L, SEQ, BUF> {
+    pub const fn new(seq: SEQ, data: ConstSlice<'data, O, L, BUF>) -> Self {
         CompactSeq { seq, data }
     }
 }
@@ -57,7 +57,7 @@ impl<
     const O: usize,
     const L: usize,
     SEQ,
-> AccessSeq<'data> for CompactSeq<'data, B, O, L, SEQ>
+> AccessSeq<'data> for CompactSeq<'data, O, L, SEQ, [u8; B]>
 where
     SEQ: AccessSeq<'data, Item = u32>,
 {
@@ -81,11 +81,38 @@ where
 
 impl<
     'data,
+    const O: usize,
+    const L: usize,
+    SEQ,
+> AccessSeq<'data> for CompactSeq<'data, O, L, SEQ, str>
+where
+    SEQ: AccessSeq<'data, Item = u32>,
+{
+    type Item = &'data str;
+
+    const LEN: usize = SEQ::LEN;
+
+    #[inline]
+    fn index(&self, index: usize) -> Self::Item {
+        let start: usize = index.checked_sub(1)
+            .map(|index| self.seq.index(index))
+            .unwrap_or_default()
+            .try_into()
+            .unwrap();
+        let end: usize = self.seq.index(index)
+            .try_into()
+            .unwrap();
+        &self.data.as_data()[start..end]
+    }
+}
+
+impl<
+    'data,
     const B: usize,
     DATA
 > AccessSeq<'data> for AlignedArray<B, u32, DATA>
 where
-    DATA: AsData<'data, B>
+    DATA: AsData<Data = &'data [u8; B]>
 {
     type Item = u32;
 

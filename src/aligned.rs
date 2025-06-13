@@ -15,7 +15,7 @@ pub struct AlignedArray<const B: usize, T, DATA> {
 
 impl<'data, const B: usize, DATA> AlignedArray<B, u32, DATA>
 where
-    DATA: AsData<'data, B>
+    DATA: AsData<Data = &'data [u8; B]>
 {
     pub const LEN: usize = {
         if B % mem::size_of::<u32>() != 0 {

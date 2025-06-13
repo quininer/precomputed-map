@@ -4,6 +4,7 @@ mod build;
 
 use std::{ fs, cmp, fmt };
 use std::io::{ self, Write };
+use std::path::PathBuf;
 
 
 pub struct MapBuilder<'a, K> {
@@ -54,7 +55,9 @@ impl<'a, K> MapBuilder<'a, K> {
         self
     }
 
-    pub fn set_next_seed(&mut self, f: &'a impl Fn(u64, u64) -> u64) -> &mut Self {
+    pub fn set_next_seed(&mut self, f: &'a (impl Fn(u64, u64) -> u64 + Send + Sync))
+        -> &mut Self
+    {
         self.next_seed = f;
         self
     }
@@ -122,9 +125,11 @@ pub struct MapOutput {
 pub struct OutputBuilder {
     name: String,
     hash: String,
+    dir: PathBuf,
     list: Vec<OutputEntry>,
-    bytes_writer: CountWriter<fs::File>,
-    u32seq_writer: CountWriter<fs::File>,
+    bytes_writer: Option<CountWriter<fs::File>>,
+    str_writer: Option<CountWriter<fs::File>>,
+    u32seq_writer: Option<CountWriter<fs::File>>,
 }
 
 struct OutputEntry {
@@ -142,6 +147,11 @@ enum OutputKind {
         len: usize
     },
     BytesSeq {
+        offset: usize,
+        len: usize,
+        index: ReferenceId
+    },
+    StrSeq {
         offset: usize,
         len: usize,
         index: ReferenceId
@@ -194,7 +204,7 @@ impl MapOutput {
 
         self.index.iter().map(|&idx| &list[idx])
     }
-    
+
     pub fn create_map(&self, name: String, data: ReferenceId, builder: &mut OutputBuilder)
         -> io::Result<ReferenceId>
     {
@@ -217,9 +227,10 @@ impl MapOutput {
             },
             MapKind::Medium { seed, slots, pilots, remap } => {
                 let pilots = if pilots.len() > (4 * 1024) {
-                    let offset = builder.bytes_writer.count;
-                    builder.bytes_writer.write_all(&pilots)?;
-                    let len = builder.bytes_writer.count - offset;
+                    let writer = builder.bytes_writer()?;
+                    let offset = writer.count;
+                    writer.write_all(&pilots)?;
+                    let len = writer.count - offset;
 
                     let id = builder.list.len();
                     builder.list.push(OutputEntry {
@@ -252,14 +263,53 @@ impl OutputBuilder {
     pub fn new<'w>(
         name: String,
         hash: String,
-        bytes_writer: fs::File,
-        u32seq_writer: fs::File
+        dir: PathBuf,
     ) -> OutputBuilder {
         OutputBuilder {
-            name, hash,
+            name, hash, dir,
             list: Vec::new(),
-            bytes_writer: CountWriter { writer: bytes_writer, count: 0 },
-            u32seq_writer: CountWriter { writer: u32seq_writer, count: 0 },
+            bytes_writer: None,
+            str_writer: None,
+            u32seq_writer: None,
+        }
+    }
+
+    fn bytes_writer(&mut self) -> io::Result<&mut CountWriter<fs::File>> {
+        if self.bytes_writer.is_some() {
+            Ok(self.bytes_writer.as_mut().unwrap())
+        } else {
+            let path = self.dir.join(format!("{}.bytes", self.name));
+            let fd = fs::File::create(path)?;
+            Ok(self.bytes_writer.get_or_insert(CountWriter {
+                writer: fd,
+                count: 0
+            }))
+        }
+    }
+
+    fn str_writer(&mut self) -> io::Result<&mut CountWriter<fs::File>> {
+        if self.str_writer.is_some() {
+            Ok(self.str_writer.as_mut().unwrap())
+        } else {
+            let path = self.dir.join(format!("{}.str", self.name));
+            let fd = fs::File::create(path)?;
+            Ok(self.str_writer.get_or_insert(CountWriter {
+                writer: fd,
+                count: 0
+            }))
+        }
+    }    
+
+    fn u32seq_writer(&mut self) -> io::Result<&mut CountWriter<fs::File>> {
+        if self.u32seq_writer.is_some() {
+            Ok(self.u32seq_writer.as_mut().unwrap())
+        } else {
+            let path = self.dir.join(format!("{}.u32seq", self.name));
+            let fd = fs::File::create(path)?;
+            Ok(self.u32seq_writer.get_or_insert(CountWriter {
+                writer: fd,
+                count: 0
+            }))
         }
     }
     
@@ -322,18 +372,19 @@ impl OutputBuilder {
         B: AsRef<[u8]>
     {
         if seq.len() > 128 {
-            let offset = self.bytes_writer.count;
+            let writer = self.bytes_writer()?;
+            let offset = writer.count;
             let mut count = 0;
             let mut list = Vec::new();
             for buf in seq {
                 let buf = buf.as_ref();
-                self.bytes_writer.write_all(buf)?;
+                writer.write_all(buf)?;
 
                 let len: u32 = buf.len().try_into().unwrap();
                 count += len;
                 list.push(count);
             }
-            let len = self.bytes_writer.count - offset;
+            let len = writer.count - offset;
             let index = self.create_u32_seq_raw(None, list.iter().copied())?;
 
             let id = self.list.len();
@@ -347,17 +398,75 @@ impl OutputBuilder {
         }
     }
 
+    pub fn create_str_seq<SEQ, B>(&mut self, name: String, seq: SEQ)
+        -> io::Result<ReferenceId>
+    where
+        SEQ: Iterator<Item = B> + ExactSizeIterator,
+        B: AsRef<str>
+    {
+        if seq.len() > 128 {
+            let writer = self.str_writer()?;
+            let offset = writer.count;
+            let mut count = 0;
+            let mut list = Vec::new();
+            for buf in seq {
+                let buf = buf.as_ref();
+                writer.write_all(buf.as_bytes())?;
+
+                let len: u32 = buf.len().try_into().unwrap();
+                count += len;
+                list.push(count);
+            }
+            let len = writer.count - offset;
+            let index = self.create_u32_seq_raw(None, list.iter().copied())?;
+
+            let id = self.list.len();
+            self.list.push(OutputEntry {
+                name: Some(name),
+                kind: OutputKind::StrSeq { offset, len, index }
+            });
+            Ok(ReferenceId(id))
+        } else {
+            use std::fmt::Write;
+            
+            struct EscapeUnicode<'a>(&'a str);
+
+            impl fmt::Display for EscapeUnicode<'_> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    for c in self.0.chars() {
+                        if c.is_ascii() && !c.is_ascii_control() {
+                            f.write_char(c)?;
+                        } else {
+                            for c in c.escape_unicode() {
+                                f.write_char(c)?;
+                            }
+                        }
+                    }
+
+                    Ok(())
+                }
+            }
+            
+            self.create_list(
+                name,
+                "&'static str".into(),
+                seq.map(|b| format!("\"{}\"", EscapeUnicode(b.as_ref())))
+            )
+        }
+    }
+
     fn create_u32_seq_raw<SEQ>(&mut self, name: Option<String>, seq: SEQ)
         -> io::Result<ReferenceId>
     where
         SEQ: Iterator<Item = u32> + ExactSizeIterator
     {
         if seq.len() > (4 * 1024) {
-            let offset = self.u32seq_writer.count;
+            let writer = self.u32seq_writer()?;
+            let offset = writer.count;
             for n in seq {
-                self.u32seq_writer.write_all(&n.to_le_bytes())?;
+                writer.write_all(&n.to_le_bytes())?;
             }
-            let len = self.u32seq_writer.count - offset;
+            let len = writer.count - offset;
 
             let id = self.list.len();
             self.list.push(OutputEntry {
@@ -384,19 +493,36 @@ impl OutputBuilder {
             value: String
         }
 
-        if self.bytes_writer.count != 0 {
+        let bytes_count = self.bytes_writer.as_ref()
+            .map(|writer| writer.count)
+            .unwrap_or_default();
+        if bytes_count != 0 {
             writeln!(writer,
-                r#"const {name}_BYTES: &[u8; {count}] = include_bytes!("{file}.bytes");"#,
-                count = self.bytes_writer.count,
+                r#"const STATIC_{name}_BYTES: &'static [u8; {count}] = include_bytes!("{file}.bytes");"#,
+                count = bytes_count,
                 name = self.name.to_ascii_uppercase(),
                 file = self.name
             )?;
         }
 
-        if self.u32seq_writer.count != 0 {
+        let str_count = self.str_writer.as_ref()
+            .map(|writer| writer.count)
+            .unwrap_or_default();
+        if str_count != 0 {
+            writeln!(writer,
+                r#"const STATIC_{name}_STR: &'static str = include_str!("{file}.str");"#,
+                name = self.name.to_ascii_uppercase(),
+                file = self.name
+            )?;
+        }
+
+        let u32seq_count = self.u32seq_writer.as_ref()
+            .map(|writer| writer.count)
+            .unwrap_or_default();
+        if u32seq_count != 0 {
             writeln!(writer,
                 "\
-const {name}_U32SEQ: &[u8; {count}] = {{
+const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
     static {name}_BYTES_U32SEQ: static_datamap::aligned::AlignedBytes<{count}, u32> =
         static_datamap::aligned::AlignedBytes {{
             align: [],
@@ -406,14 +532,15 @@ const {name}_U32SEQ: &[u8; {count}] = {{
     &{name}_BYTES_U32SEQ.bytes
 }};\
                 ",
-                count = self.u32seq_writer.count,
+                count = u32seq_count,
                 name = self.name.to_ascii_uppercase(),
                 file = self.name
             )?;
         }
 
-        let bytes = format!("{}_BYTES", self.name.to_ascii_uppercase());
-        let u32seq = format!("{}_U32SEQ", self.name.to_ascii_uppercase());
+        let bytes = format!("STATIC_{}_BYTES", self.name.to_ascii_uppercase());
+        let str_ref = format!("STATIC_{}_STR", self.name.to_ascii_uppercase());
+        let u32seq = format!("STATIC_{}_U32SEQ", self.name.to_ascii_uppercase());
         let mut list: Vec<ReferenceEntry> = Vec::with_capacity(self.list.len());
 
         for entry in &self.list {
@@ -424,10 +551,10 @@ const {name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::U8Seq { offset, len } => {
                     let ty = format!(
-                        "static_datamap::store::ConstSlice<'static, {}, {}, {}>",
-                        self.bytes_writer.count,
+                        "static_datamap::store::ConstSlice<'static, {}, {}, [u8; {}]>",
                         offset,
-                        len
+                        len,
+                        bytes_count,
                     );
                     let val = format!("<{}>::new({})", ty, bytes);
 
@@ -440,10 +567,10 @@ const {name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::U32Seq { offset, len } => {
                     let data_ty = format!(
-                        "static_datamap::store::ConstSlice<'static, {}, {}, {}>",
-                        self.u32seq_writer.count,
+                        "static_datamap::store::ConstSlice<'static, {}, {}, [u8; {}]>",
                         offset,
-                        len
+                        len,
+                        u32seq_count,
                     );
                     let ty = format!(
                         "static_datamap::aligned::AlignedArray<{}, u32, {}>",
@@ -462,8 +589,25 @@ const {name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::BytesSeq { offset, len, index } => {
                     let ty = format!(
-                        "static_datamap::seq::CompactSeq<'static, {}, {}, {}, {}>",
-                        self.bytes_writer.count,
+                        "static_datamap::seq::CompactSeq<'static, {}, {}, {}, [u8; {}]>",
+                        offset,
+                        len,
+                        &list[index.0].r#type,
+                        bytes_count,
+                    );
+                    let val = format!(
+                        "static_datamap::seq::CompactSeq::new({}, static_datamap::store::ConstSlice::new({}))",
+                        &list[index.0].value,
+                        bytes
+                    );
+
+                    let entry_name = entry.name.as_ref().unwrap();
+                    writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
+                    ReferenceEntry { r#type: ty, value: entry_name.clone() }                    
+                },
+                OutputKind::StrSeq { offset, len, index } => {
+                    let ty = format!(
+                        "static_datamap::seq::CompactSeq<'static, {}, {}, {}, str>",
                         offset,
                         len,
                         &list[index.0].r#type
@@ -471,7 +615,7 @@ const {name}_U32SEQ: &[u8; {count}] = {{
                     let val = format!(
                         "static_datamap::seq::CompactSeq::new({}, static_datamap::store::ConstSlice::new({}))",
                         &list[index.0].value,
-                        bytes
+                        str_ref
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
