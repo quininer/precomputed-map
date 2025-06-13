@@ -14,7 +14,7 @@ pub struct MapBuilder<'a, K> {
     ord: Option<&'a dyn Fn(&K, &K) -> cmp::Ordering>,
     hash: Option<&'a dyn Fn(u64, &K) -> u64>,
     next_seed: &'a dyn Fn(u64, u64) -> u64,
-    force_build: bool,
+    force_try_build: bool,
 }
 
 impl<'a, K> MapBuilder<'a, K> {
@@ -31,7 +31,7 @@ impl<'a, K> MapBuilder<'a, K> {
                 std::collections::hash_map::RandomState::new()
                     .hash_one((init_seed, c))
             },
-            force_build: false
+            force_try_build: false
         }
     }
 
@@ -62,8 +62,8 @@ impl<'a, K> MapBuilder<'a, K> {
         self
     }
 
-    pub fn set_force_build(&mut self, flag: bool) -> &mut Self {
-        self.force_build = flag;
+    pub fn set_force_try_build(&mut self, flag: bool) -> &mut Self {
+        self.force_try_build = flag;
         self
     }
 
@@ -74,13 +74,13 @@ impl<'a, K> MapBuilder<'a, K> {
             }
         }
 
-        if self.keys.len() <= 1024 {
+        if self.force_try_build && self.keys.len() <= 1024 {
             if let Some(output) = build::build_small(self) {
                 return Ok(output);
             }
         }
 
-        if !self.force_build && self.keys.len() > 10 * 1024 * 1024 {
+        if !self.force_try_build && self.keys.len() > 10 * 1024 * 1024 {
             return Err(BuildFailed("WARN: \
                 We currently don't have good support for large numbers of keys,\
                 and this construction may be slow or not complete in a reasonable time.\
@@ -196,7 +196,10 @@ impl MapOutput {
             MapKind::Medium { seed, .. } => Some(*seed)
         }
     }
-    
+
+    /// Generates a reordered iterator based on the constructed map.
+    ///
+    /// The lengths of provided lists must be equal.    
     pub fn reorder<'list: 'map, 'map, T>(&'map self, list: &'list [T])
         -> impl Iterator<Item = &'list T> + ExactSizeIterator + 'map
     {
@@ -205,6 +208,11 @@ impl MapOutput {
         self.index.iter().map(|&idx| &list[idx])
     }
 
+    /// Create static map
+    ///
+    /// # NOTE
+    ///
+    /// The provided data must be reordered, otherwise the behavior will be unexpected.
     pub fn create_map(&self, name: String, data: ReferenceId, builder: &mut OutputBuilder)
         -> io::Result<ReferenceId>
     {
