@@ -11,36 +11,8 @@ use core::borrow::Borrow;
 use core::hash::Hash;
 use core::marker::PhantomData;
 use phf::HashOne;
+use store::{ MapStore, AccessSeq, Searchable };
 
-
-pub trait AsData<'data, const N: usize> {
-    fn as_data(&self) -> &'data [u8; N];
-}
-
-pub trait MapStore<'data> {
-    type Key: 'data;
-    type Value: 'data;
-
-    const LEN: usize;
-    
-    fn get_key(&self, index: usize) -> Self::Key;
-    fn get_value(&self, index: usize) -> Self::Value;
-}
-
-pub trait AccessSeq<'data> {
-    type Item: 'data;
-    const LEN: usize;
-
-    fn index(&self, index: usize) -> Self::Item;
-}
-
-pub trait Searchable<'data>: MapStore<'data> {
-    fn search<Q>(&self, key: &Q) -> Option<Self::Value>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Eq + ?Sized
-    ;
-}
 
 /// Tiny map
 ///
@@ -59,11 +31,15 @@ where
         TinyMap { data, _phantom: PhantomData }
     }
 
+    pub const fn len(&self) -> usize {
+        D::LEN
+    }
+
     pub fn get<Q>(&self, key: &Q)
         -> Option<D::Value>
     where
         D::Key: Borrow<Q>,
-        Q: Hash + Eq + ?Sized
+        Q: Ord + ?Sized
     {
         self.data.search(key)
     }
@@ -90,7 +66,12 @@ where
             _phantom: PhantomData
         }
     }
+
+    pub const fn len(&self) -> usize {
+        D::LEN
+    }    
     
+    #[inline]
     fn inner_get<Q>(&self, key: &Q) -> usize
     where
         Q: Hash + ?Sized
@@ -145,6 +126,11 @@ where
         }
     }
 
+    pub const fn len(&self) -> usize {
+        D::LEN
+    }    
+
+    #[inline]
     fn inner_get<Q>(&self, key: &Q) -> usize
     where
         Q: Hash + ?Sized

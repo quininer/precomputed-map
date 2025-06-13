@@ -6,7 +6,12 @@ use static_datamap::phf::{ HashOne, U64Hasher };
 fn main() {
     let mut args = std::env::args().skip(1);
 
-    let map = (0u32..10000)
+    let mode = args.next();
+    let num = args.next()
+        .map(|num| num.parse::<u32>().unwrap())
+        .unwrap_or(10000);
+
+    let map = (0u32..num)
         .map(|id| {
             let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id);
             let k = format!("{:x}{}", hash, id);
@@ -15,7 +20,7 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
-    match args.next().as_deref() {
+    match mode.as_deref() {
         Some("datamap") => datamap(&map),
         Some("naive") => naive(&map),
         _ => panic!()
@@ -68,9 +73,9 @@ fn main() {{
     let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
     assert_eq!(id, {});
 
-    // let mut sum = std::time::Duration::new(0, 0);
+    let mut sum = std::time::Duration::new(0, 0);
 
-    for id in 0..STR2ID_STR.len() {{
+    for id in 0..STR2ID_MAP.len() {{
         let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id as u32);
         let k = format!("{{:x}}{{}}", hash, id);
         let s = std::hint::black_box(k.as_bytes());

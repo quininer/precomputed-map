@@ -187,8 +187,8 @@ impl MapOutput {
         }
     }
     
-    pub fn reorder<'a: 'i, 'i, T>(&'i self, list: &'a [T])
-        -> impl Iterator<Item = &'a T> + 'i
+    pub fn reorder<'list: 'map, 'map, T>(&'map self, list: &'list [T])
+        -> impl Iterator<Item = &'list T> + ExactSizeIterator + 'map
     {
         assert_eq!(self.index.len(), list.len());
 
@@ -216,7 +216,7 @@ impl MapOutput {
                 Ok(ReferenceId(id))                
             },
             MapKind::Medium { seed, slots, pilots, remap } => {
-                let pilots = {
+                let pilots = if pilots.len() > (4 * 1024) {
                     let offset = builder.bytes_writer.count;
                     builder.bytes_writer.write_all(&pilots)?;
                     let len = builder.bytes_writer.count - offset;
@@ -227,22 +227,11 @@ impl MapOutput {
                         kind: OutputKind::U8Seq { offset, len }
                     });
                     ReferenceId(id)
+                } else {
+                    builder.create_list_raw(None, "u8".into(), pilots.iter().copied())?
                 };
 
-                let remap = {
-                    let offset = builder.u32seq_writer.count;
-                    for &n in remap {
-                        builder.u32seq_writer.write_all(&n.to_le_bytes())?;
-                    }
-                    let len = builder.u32seq_writer.count - offset;
-
-                    let id = builder.list.len();
-                    builder.list.push(OutputEntry {
-                        name: None,
-                        kind: OutputKind::U32Seq { offset, len }
-                    });
-                    ReferenceId(id)                    
-                };
+                let remap = builder.create_u32_seq_raw(None, remap.iter().copied())?;
 
                 let id = builder.list.len();
                 builder.list.push(OutputEntry {
@@ -283,28 +272,38 @@ impl OutputBuilder {
         ReferenceId(id)
     }
 
-    pub fn create_list<SEQ, T>(&mut self, name: String, item_type: String, seq: SEQ)
-        -> Result<ReferenceId, fmt::Error>
+    fn create_list_raw<SEQ, T>(&mut self, name: Option<String>, item_type: String, seq: SEQ)
+        -> io::Result<ReferenceId>
     where
         SEQ: Iterator<Item = T> + ExactSizeIterator,
         T: fmt::Display
     {
-        use fmt::Write;
-
+        use std::io::Write;
+        
         let len = seq.len();        
-        let mut s = String::new();
+        let mut s = Vec::new();
         write!(s, "&[")?;
         for t in seq {
             write!(s, "{},", t)?;
         }
         write!(s, "]")?;
+        let value = String::from_utf8(s).unwrap();
         
         let id = self.list.len();
         self.list.push(OutputEntry {
-            name: Some(name),
-            kind: OutputKind::List { item_type, len, value: s }
+            name,
+            kind: OutputKind::List { item_type, len, value }
         });
         Ok(ReferenceId(id))
+    }
+
+    pub fn create_list<SEQ, T>(&mut self, name: String, item_type: String, seq: SEQ)
+        -> io::Result<ReferenceId>
+    where
+        SEQ: Iterator<Item = T> + ExactSizeIterator,
+        T: fmt::Display
+    {
+        self.create_list_raw(Some(name), item_type, seq)
     }
     
     pub fn create_pair(&mut self, keys: ReferenceId, values: ReferenceId) -> ReferenceId {
@@ -319,54 +318,62 @@ impl OutputBuilder {
     pub fn create_bytes_seq<SEQ, B>(&mut self, name: String, seq: SEQ)
         -> io::Result<ReferenceId>
     where
-        SEQ: Iterator<Item = B>,
+        SEQ: Iterator<Item = B> + ExactSizeIterator,
         B: AsRef<[u8]>
     {
-        let offset = self.bytes_writer.count;
-        let mut count = 0;
-        let mut list = Vec::new();
-        for buf in seq {
-            let buf = buf.as_ref();
-            self.bytes_writer.write_all(buf)?;
+        if seq.len() > 128 {
+            let offset = self.bytes_writer.count;
+            let mut count = 0;
+            let mut list = Vec::new();
+            for buf in seq {
+                let buf = buf.as_ref();
+                self.bytes_writer.write_all(buf)?;
 
-            let len: u32 = buf.len().try_into().unwrap();
-            count += len;
-            list.push(count);
+                let len: u32 = buf.len().try_into().unwrap();
+                count += len;
+                list.push(count);
+            }
+            let len = self.bytes_writer.count - offset;
+            let index = self.create_u32_seq_raw(None, list.iter().copied())?;
+
+            let id = self.list.len();
+            self.list.push(OutputEntry {
+                name: Some(name),
+                kind: OutputKind::BytesSeq { offset, len, index }
+            });
+            Ok(ReferenceId(id))
+        } else {
+            self.create_list(name, "&'static [u8]".into(), seq.map(|b| format!("&{:?}", b.as_ref())))
         }
-        let len = self.bytes_writer.count - offset;
-        let index = self.create_u32_seq_raw(None, list.iter().copied())?;
-
-        let id = self.list.len();
-        self.list.push(OutputEntry {
-            name: Some(name),
-            kind: OutputKind::BytesSeq { offset, len, index }
-        });
-        Ok(ReferenceId(id))
     }
 
     fn create_u32_seq_raw<SEQ>(&mut self, name: Option<String>, seq: SEQ)
         -> io::Result<ReferenceId>
     where
-        SEQ: Iterator<Item = u32>
+        SEQ: Iterator<Item = u32> + ExactSizeIterator
     {
-        let offset = self.u32seq_writer.count;
-        for n in seq {
-            self.u32seq_writer.write_all(&n.to_le_bytes())?;
-        }
-        let len = self.u32seq_writer.count - offset;
+        if seq.len() > (4 * 1024) {
+            let offset = self.u32seq_writer.count;
+            for n in seq {
+                self.u32seq_writer.write_all(&n.to_le_bytes())?;
+            }
+            let len = self.u32seq_writer.count - offset;
 
-        let id = self.list.len();
-        self.list.push(OutputEntry {
-            name,
-            kind: OutputKind::U32Seq { offset, len }
-        });
-        Ok(ReferenceId(id))        
+            let id = self.list.len();
+            self.list.push(OutputEntry {
+                name,
+                kind: OutputKind::U32Seq { offset, len }
+            });
+            Ok(ReferenceId(id))
+        } else {
+            self.create_list_raw(name, "u32".into(), seq)
+        }        
     }    
 
     pub fn create_u32_seq<SEQ>(&mut self, name: String, seq: SEQ)
         -> io::Result<ReferenceId>
     where
-        SEQ: Iterator<Item = u32>
+        SEQ: Iterator<Item = u32> + ExactSizeIterator
     {
         self.create_u32_seq_raw(Some(name), seq)
     }
@@ -389,15 +396,15 @@ impl OutputBuilder {
         if self.u32seq_writer.count != 0 {
             writeln!(writer,
                 "\
-                const {name}_U32SEQ: &[u8; {count}] = {{
-                    static {name}_BYTES_U32SEQ: static_datamap::aligned::AlignedBytes<{count}, u32> = \
-                        static_datamap::aligned::AlignedBytes {{
-                            align: [],
-                            bytes: *include_bytes!(\"{file}.u32seq\")
-                        }};
+const {name}_U32SEQ: &[u8; {count}] = {{
+    static {name}_BYTES_U32SEQ: static_datamap::aligned::AlignedBytes<{count}, u32> =
+        static_datamap::aligned::AlignedBytes {{
+            align: [],
+            bytes: *include_bytes!(\"{file}.u32seq\")
+        }};
 
-                    &{name}_BYTES_U32SEQ.bytes
-                }};\
+    &{name}_BYTES_U32SEQ.bytes
+}};\
                 ",
                 count = self.u32seq_writer.count,
                 name = self.name.to_ascii_uppercase(),
@@ -476,7 +483,7 @@ impl OutputBuilder {
                     let val = format!("static_datamap::seq::List({})", value);
                     
                     if let Some(entry_name) = entry.name.as_ref() {
-                        writeln!(writer, "const {}: {} = {}", entry_name, ty, val)?;
+                        writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
                         ReferenceEntry { r#type: ty, value: entry_name.clone() }
                     } else {
                         ReferenceEntry { r#type: ty, value: val }
@@ -498,11 +505,11 @@ impl OutputBuilder {
                 }
                 OutputKind::Tiny(data) => {
                     let ty = format!(
-                        "static_datamap::TinyMap<'static, {}>",
+                        "static_datamap::TinyMap<'static, static_datamap::store::Ordered<{}>>",
                         &list[data.0].r#type
                     );
                     let val = format!(
-                        "<{}>::new({})",
+                        "<{}>::new(static_datamap::store::Ordered({}))",
                         ty,
                         &list[data.0].value,
                     );

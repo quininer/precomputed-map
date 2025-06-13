@@ -1,10 +1,43 @@
+use core::borrow::Borrow;
 use core::marker::PhantomData;
-use crate::{ MapStore, AccessSeq, AsData };
+use crate::seq::List;
+
+
+pub trait AsData<'data, const N: usize> {
+    fn as_data(&self) -> &'data [u8; N];
+}
+
+pub trait MapStore<'data> {
+    type Key: 'data;
+    type Value: 'data;
+
+    const LEN: usize;
+    
+    fn get_key(&self, index: usize) -> Self::Key;
+    fn get_value(&self, index: usize) -> Self::Value;
+}
+
+pub trait AccessSeq<'data> {
+    type Item: 'data;
+    const LEN: usize;
+
+    fn index(&self, index: usize) -> Self::Item;
+}
+
+pub trait Searchable<'data>: MapStore<'data> {
+    fn search<Q>(&self, key: &Q) -> Option<Self::Value>
+    where
+        Self::Key: Borrow<Q>,
+        Q: Ord + ?Sized
+    ;
+}
 
 pub struct ConstSlice<'data, const B: usize, const O: usize, const L: usize> {
     data: &'data [u8; B],
     _phantom: PhantomData<([u8; O], [u8; L])>
 }
+
+pub struct Ordered<D>(pub D);
 
 impl<'data, const B: usize, const O: usize, const L: usize> ConstSlice<'data, B, O, L> {
     pub const fn new(data: &'data [u8; B]) -> Self {
@@ -83,5 +116,54 @@ where
     #[inline]
     fn get_value(&self, index: usize) -> Self::Value {
         self.1.index(index)
+    }
+}
+
+impl<'data, M> MapStore<'data> for Ordered<M>
+where
+    M: MapStore<'data>
+{
+    type Key = M::Key;
+    type Value = M::Value;
+
+    const LEN: usize = M::LEN;
+
+
+    #[inline]
+    fn get_key(&self, index: usize) -> Self::Key {
+        self.0.get_key(index)
+    }
+
+    #[inline]
+    fn get_value(&self, index: usize) -> Self::Value {
+        self.0.get_value(index)
+    }
+}
+
+impl<'data, const N: usize, T> Searchable<'data> for Ordered<List<'data, N, T>>
+where
+    T: Copy
+{
+    fn search<Q>(&self, key: &Q) -> Option<Self::Value>
+    where
+        Self::Key: core::borrow::Borrow<Q>,
+        Q: Ord + ?Sized
+    {
+        self.0.0.binary_search_by(|t| t.borrow().cmp(key)).ok()
+    }
+}
+
+impl<'data, const N: usize, K, V> Searchable<'data> for Ordered<(List<'data, N, K>, V)>
+where
+    K: Copy,
+    V: AccessSeq<'data>
+{
+    fn search<Q>(&self, key: &Q) -> Option<Self::Value>
+    where
+        Self::Key: core::borrow::Borrow<Q>,
+        Q: Ord + ?Sized
+    {
+        let index = self.0.0.0.binary_search_by(|t| t.borrow().cmp(key)).ok()?;
+        Some(self.0.1.index(index))
     }
 }

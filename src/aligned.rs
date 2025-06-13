@@ -1,6 +1,6 @@
 use core::mem;
 use core::marker::PhantomData;
-use crate::AsData;
+use crate::store::AsData;
 
 pub struct AlignedBytes<const B: usize, T> {
     pub align: [T; 0],

@@ -1,7 +1,7 @@
 use crate::aligned::AlignedArray;
 use crate::store::ConstSlice;
 use crate::AccessSeq;
-use crate::AsData;
+use crate::store::AsData;
 
 pub struct List<'data, const N: usize, T>(pub &'data [T; N]);
 pub struct RefList<'data, const N: usize, T>(pub &'data [T; N]);
@@ -26,21 +26,6 @@ impl<
 > CompactSeq<'data, B, O, L, SEQ> {
     pub const fn new(seq: SEQ, data: ConstSlice<'data, B, O, L>) -> Self {
         CompactSeq { seq, data }
-    }
-}
-
-impl<
-    'data,
-    const B: usize,
-    const O: usize,
-    const L: usize,
-    SEQ,
-> CompactSeq<'data, B, O, L, SEQ>
-where
-    SEQ: AccessSeq<'data, Item = u32>,
-{
-    pub const fn len(&self) -> usize {
-        SEQ::LEN
     }
 }
 
