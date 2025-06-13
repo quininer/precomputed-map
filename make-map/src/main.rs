@@ -1,5 +1,3 @@
-#![cfg(feature = "builder")]
-
 use std::fs;
 use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
@@ -70,7 +68,7 @@ fn main() {{
     let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
     assert_eq!(id, {});
 
-    let mut sum = std::time::Duration::new(0, 0);
+    // let mut sum = std::time::Duration::new(0, 0);
 
     for id in 0..STR2ID_STR.len() {{
         let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id as u32);
@@ -115,7 +113,7 @@ fn main() {{
 
         let now = std::time::Instant::now();
         for _ in 0..10 {{
-            let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
+            let id = map_get(std::hint::black_box(&STR2ID_MAP), s);
             std::hint::black_box(id);
         }}
         sum += now.elapsed() / 10;
@@ -126,6 +124,11 @@ fn main() {{
 
 use std::collections::HashMap;
 
+#[inline(never)]
+fn map_get(map: &HashMap<&'static [u8], u32>, s: &[u8]) -> Option<u32> {{
+    map.get(s).copied()
+}}
+
 static STR2ID_DATA: &'static [(&'static str, u32)] = &[
         "#,
         map[1].0,
@@ -135,7 +138,6 @@ static STR2ID_DATA: &'static [(&'static str, u32)] = &[
     for (k, v) in map {
         writeln!(code_file, "(\"{}\", {}),", k, v).unwrap();
     }
-
 
     writeln!(code_file,
         r#"

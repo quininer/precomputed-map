@@ -1,5 +1,6 @@
 /target
-/examples/str2id.bytes
-/examples/str2id.u32seq
-/examples/str2id.rs
-/examples/str2id_naive.rs
+/make-map/examples/str2id.bytes
+/make-map/examples/str2id.u32seq
+/make-map/examples/str2id.rs
+/make-map/examples/str2id_naive.rs
+/make-map/target
