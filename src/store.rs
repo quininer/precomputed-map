@@ -145,7 +145,6 @@ where
 
     const LEN: usize = M::LEN;
 
-
     #[inline]
     fn get_key(&self, index: usize) -> Self::Key {
         self.0.get_key(index)
@@ -163,10 +162,10 @@ where
 {
     fn search<Q>(&self, key: &Q) -> Option<Self::Value>
     where
-        Self::Key: core::borrow::Borrow<Q>,
+        Self::Key: Borrow<Q>,
         Q: Ord + ?Sized
     {
-        self.0.0.binary_search_by(|t| t.borrow().cmp(key)).ok()
+        self.0.0.binary_search_by(|t| Ord::cmp(t.borrow(), key)).ok()
     }
 }
 
@@ -177,10 +176,60 @@ where
 {
     fn search<Q>(&self, key: &Q) -> Option<Self::Value>
     where
-        Self::Key: core::borrow::Borrow<Q>,
+        Self::Key: Borrow<Q>,
         Q: Ord + ?Sized
     {
-        let index = self.0.0.0.binary_search_by(|t| t.borrow().cmp(key)).ok()?;
+        let index = self.0.0.0.binary_search_by(|t| Ord::cmp(t.borrow(), key)).ok()?;
         Some(self.0.1.index(index))
+    }
+}
+
+pub struct MapIter<'iter, 'data, D> {
+    store: &'iter D,
+    next: usize,
+    _phantom: PhantomData<&'data D>
+}
+
+impl<'iter, 'data, D> MapIter<'iter, 'data, D> {
+    pub(super) const fn new(store: &'iter D) -> Self {
+        MapIter { store, next: 0, _phantom: PhantomData }
+    }
+}
+
+impl<'iter, 'data, D> Iterator for MapIter<'iter, 'data, D>
+where
+    D: MapStore<'data>
+{
+    type Item = (D::Key, D::Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next < D::LEN {
+            let k = self.store.get_key(self.next);
+            let v = self.store.get_value(self.next);
+            self.next += 1;
+            Some((k, v))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'iter, 'data, D> ExactSizeIterator for MapIter<'iter, 'data, D>
+where
+    D: MapStore<'data>
+{
+    fn len(&self) -> usize {
+        D::LEN
+    }
+}
+
+impl<'iter, 'data, D> Clone for MapIter<'iter, 'data, D> {
+    #[inline]
+    fn clone(&self) -> Self {
+        MapIter {
+            store: self.store,
+            next: self.next,
+            _phantom: PhantomData
+        }
     }
 }

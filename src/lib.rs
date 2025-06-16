@@ -43,6 +43,10 @@ where
     {
         self.data.search(key)
     }
+
+    pub const fn iter(&self) -> store::MapIter<'_, 'data, D> {
+        store::MapIter::new(&self.data)
+    }
 }
 
 /// Small map
@@ -95,6 +99,10 @@ where
             None
         }
     }
+
+    pub const fn iter(&self) -> store::MapIter<'_, 'data, D> {
+        store::MapIter::new(&self.data)
+    }    
 }
 
 /// Medium map
@@ -162,6 +170,10 @@ where
             None
         }
     }
+
+    pub const fn iter(&self) -> store::MapIter<'_, 'data, D> {
+        store::MapIter::new(&self.data)
+    }    
 }
 
 // https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
