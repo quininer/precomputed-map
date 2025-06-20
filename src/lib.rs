@@ -56,7 +56,7 @@ where
 
 /// Small map
 ///
-/// 16..1024
+/// 0..12
 pub struct SmallMap<'data, D, H> {
     seed: u64,
     data: D,

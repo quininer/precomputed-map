@@ -33,7 +33,7 @@ pub(super) fn build_small<K>(builder: &MapBuilder<'_, K>)
     let mut map = vec![None; builder.keys.len()];
     let keys_len: u32 = builder.keys.len().try_into().unwrap();
 
-    'search: for c in 0..1024 {
+    'search: for c in 0..(128 * 1024) {
         map.iter_mut().for_each(|idx| *idx = None);
         hashes.clear();
         hashes.extend(builder.keys.iter().map(|v| hash(seed, v)));

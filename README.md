@@ -55,8 +55,8 @@ let mut builder = precomputed_map::builder::CodeBuilder::new(
     "src/generated".into(),
 );
 
-let k = builder.create_str_seq("MYMAP_KEYS".into(), mapout.reorder(&keys)).unwrap();
-let v = builder.create_str_seq("MYMAP_VALUES".into(), mapout.reorder(&values)).unwrap();
+let k = builder.create_str_seq("MYMAP_KEYS".into(), mapout.reorder(keys)).unwrap();
+let v = builder.create_str_seq("MYMAP_VALUES".into(), mapout.reorder(values)).unwrap();
 let pair = builder.create_pair(k, v);
 
 mapout.create_map("MYMAP".into(), pair, &mut builder).unwrap();

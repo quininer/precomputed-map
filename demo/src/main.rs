@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use std::fs;
 use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
@@ -48,8 +50,8 @@ fn precomputed(map: &[(String, u32)]) {
         "examples".into(),
     );
 
-    let k = mapout.reorder(&map).map(|(k, _)| k.as_str());
-    let v = mapout.reorder(&map).map(|(_, v)| *v);
+    let k = mapout.reorder(map).map(|(k, _)| k.as_str());
+    let v = mapout.reorder(map).map(|(_, v)| *v);
 
     let k = builder.create_str_seq("STR2ID_STR".into(), k).unwrap();
     let v = builder.create_u32_seq("STR2ID_ID".into(), v).unwrap();

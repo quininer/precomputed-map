@@ -19,7 +19,6 @@ pub struct MapBuilder<'a, K> {
     ord: Option<OrdFunc<'a, K>>,
     hash: Option<HashFunc<'a, K>>,
     next_seed: fn(u64, u64) -> u64,
-    force_try_build: bool,
 }
 
 pub type OrdFunc<'a, K> = &'a dyn Fn(&K, &K) -> cmp::Ordering;
@@ -34,12 +33,13 @@ impl<'a, K> MapBuilder<'a, K> {
             ord: None,
             hash: None,
             next_seed: |init_seed, c| {
-                use std::hash::BuildHasher;
-    
-                std::collections::hash_map::RandomState::new()
-                    .hash_one((init_seed, c))
+                use std::hash::Hasher;
+
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                hasher.write_u64(init_seed);
+                hasher.write_u64(c);
+                hasher.finish()
             },
-            force_try_build: false
         }
     }
 
@@ -70,12 +70,6 @@ impl<'a, K> MapBuilder<'a, K> {
         self
     }
 
-    /// Always try to construct a small map
-    pub fn set_force_try_build(&mut self, flag: bool) -> &mut Self {
-        self.force_try_build = flag;
-        self
-    }
-
     pub fn build(&self) -> Result<MapOutput, BuildFailed> {
         if self.keys.len() <= 16 {
             // For tiny amounts of data, binary search is usually faster.
@@ -86,17 +80,19 @@ impl<'a, K> MapBuilder<'a, K> {
             }
         }
 
-        if self.force_try_build && self.keys.len() <= 1024 {
+        if self.keys.len() <= 128 {
             // For small numbers of keys, try to build the smallest and fastest phf.
             //
             // This outperforms all other phfs,
             // but for large numbers of keys, this may not be able to find the seed in a reasonable time.
+            //
+            // If the keys length is greater than 12, it will usually fallback to medium map.
             if let Some(output) = build::build_small(self) {
                 return Ok(output);
             }
         }
 
-        if !self.force_try_build && self.keys.len() > 10 * 1024 * 1024 {
+        if self.keys.len() > 10 * 1024 * 1024 {
             return Err(BuildFailed("WARN: \
                 We currently don't have good support for large numbers of keys,\
                 and this construction may be slow or not complete in a reasonable time.\
@@ -149,6 +145,7 @@ pub struct CodeBuilder {
     name: String,
     hash: String,
     dir: PathBuf,
+    vis: Option<String>,
     list: Vec<OutputEntry>,
     bytes_writer: Option<CountWriter<fs::File>>,
     str_writer: Option<CountWriter<fs::File>>,
@@ -304,11 +301,17 @@ impl CodeBuilder {
     ) -> CodeBuilder {
         CodeBuilder {
             name, hash, dir,
+            vis: None,
             list: Vec::new(),
             bytes_writer: None,
             str_writer: None,
             u32seq_writer: None,
         }
+    }
+
+    /// This will configure the generated code as `pub(vis)`.
+    pub fn set_visibility(&mut self, vis: Option<String>) {
+        self.vis = vis;
     }
 
     fn bytes_writer(&mut self) -> io::Result<&mut CountWriter<fs::File>> {
@@ -530,6 +533,11 @@ impl CodeBuilder {
             value: String
         }
 
+        let crate_name = env!("CARGO_CRATE_NAME");
+        let vis = self.vis.as_deref()
+            .map(|vis| format!("pub({}) ", vis))
+            .unwrap_or_default();
+
         let bytes_count = self.bytes_writer.as_ref()
             .map(|writer| writer.count)
             .unwrap_or_default();
@@ -569,7 +577,6 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
     &{name}_BYTES_U32SEQ.bytes
 }};\
                 ",
-                crate_name = env!("CARGO_CRATE_NAME"),
                 count = u32seq_count,
                 name = self.name.to_ascii_uppercase(),
                 file = self.name
@@ -593,12 +600,11 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                         offset,
                         len,
                         bytes_count,
-                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let val = format!("<{}>::new({})", ty, bytes);
 
                     if let Some(entry_name) = entry.name.as_ref() {
-                        writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
+                        writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
                         ReferenceEntry { r#type: ty, value: entry_name.clone() }
                     } else {
                         ReferenceEntry { r#type: ty, value: val }
@@ -610,19 +616,17 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                         offset,
                         len,
                         u32seq_count,
-                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let ty = format!(
                         "{crate_name}::aligned::AlignedArray<{}, u32, {}>",
                         len,
                         data_ty,
-                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let data_val = format!("<{}>::new({})", data_ty, u32seq);
                     let val = format!("<{}>::new({})", ty, data_val);
 
                     if let Some(entry_name) = entry.name.as_ref() {
-                        writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
+                        writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
                         ReferenceEntry { r#type: ty, value: entry_name.clone() }
                     } else {
                         ReferenceEntry { r#type: ty, value: val }
@@ -635,17 +639,15 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                         len,
                         &list[index.0].r#type,
                         bytes_count,
-                        crate_name = env!("CARGO_CRATE_NAME")
                     );
                     let val = format!(
                         "{crate_name}::seq::CompactSeq::new({}, {crate_name}::store::ConstSlice::new({}))",
                         &list[index.0].value,
                         bytes,
-                        crate_name = env!("CARGO_CRATE_NAME")
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
+                    writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
                     ReferenceEntry { r#type: ty, value: entry_name.clone() }                    
                 },
                 OutputKind::StrSeq { offset, len, index } => {
@@ -654,33 +656,26 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                         offset,
                         len,
                         &list[index.0].r#type,
-                        crate_name = env!("CARGO_CRATE_NAME")
                     );
                     let val = format!(
                         "{crate_name}::seq::CompactSeq::new({}, {crate_name}::store::ConstSlice::new({}))",
                         &list[index.0].value,
                         str_ref,
-                        crate_name = env!("CARGO_CRATE_NAME")
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
+                    writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
                     ReferenceEntry { r#type: ty, value: entry_name.clone() }                    
                 },
                 OutputKind::List { item_type, value, len } => {
                     let ty = format!(
                         "{crate_name}::seq::List<'static, {}, {}>",
                         len, item_type,
-                        crate_name = env!("CARGO_CRATE_NAME")
                     );
-                    let val = format!("
-                        {crate_name}::seq::List({})",
-                        value,
-                        crate_name = env!("CARGO_CRATE_NAME")
-                    );
+                    let val = format!("{crate_name}::seq::List({})", value);
                     
                     if let Some(entry_name) = entry.name.as_ref() {
-                        writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
+                        writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
                         ReferenceEntry { r#type: ty, value: entry_name.clone() }
                     } else {
                         ReferenceEntry { r#type: ty, value: val }
@@ -704,17 +699,14 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                     let ty = format!(
                         "{crate_name}::TinyMap<'static, {crate_name}::store::Ordered<{}>>",
                         &list[data.0].r#type,
-                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let val = format!(
-                        "<{}>::new({crate_name}::store::Ordered({}))",
-                        ty,
+                        "{crate_name}::TinyMap::new({crate_name}::store::Ordered({}))",
                         &list[data.0].value,
-                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "static {}: {} = {};", entry_name, ty, val)?;
+                    writeln!(writer, "{vis}static {}: {} = {};", entry_name, ty, val)?;
                     ReferenceEntry { r#type: ty, value: entry_name.clone() }
                 },
                 OutputKind::Small { seed, data } => {
@@ -722,17 +714,15 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                         "{crate_name}::SmallMap<'static, {}, {}>",
                         &list[data.0].r#type,
                         self.hash,
-                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let val = format!(
-                        "<{}>::new({}, {})",
-                        ty,
+                        "{crate_name}::SmallMap::new({}, {})",
                         seed,
                         &list[data.0].value,
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "static {}: {} = {};", entry_name, ty, val)?;
+                    writeln!(writer, "{vis}static {}: {} = {};", entry_name, ty, val)?;
                     ReferenceEntry { r#type: ty, value: entry_name.clone() }
                 },
                 OutputKind::Medium { seed, slots, pilots, remap, data } => {
@@ -742,7 +732,6 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                         &list[remap.0].r#type,
                         &list[data.0].r#type,
                         self.hash,
-                        crate_name = env!("CARGO_CRATE_NAME")
                     );
                     let val = format!(
                         "{crate_name}::MediumMap::new({}, {}, {}, {}, {})",
@@ -751,11 +740,10 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                         &list[pilots.0].value,
                         &list[remap.0].value,
                         &list[data.0].value,
-                        crate_name = env!("CARGO_CRATE_NAME")
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "static {}: {} = {};", entry_name, ty, val)?;
+                    writeln!(writer, "{vis}static {}: {} = {};", entry_name, ty, val)?;
                     ReferenceEntry { r#type: ty, value: entry_name.clone() }
                 },
             };
