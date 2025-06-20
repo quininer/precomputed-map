@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "builder"), no_std)]
+#![doc = include_str!("../README.md")]
 
 #[cfg(feature = "builder")]
 pub mod builder;

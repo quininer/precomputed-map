@@ -9,6 +9,9 @@ use std::io::{ self, Write };
 use std::path::PathBuf;
 
 
+/// Static Map builder
+///
+/// Computes an appropriate static map based on the provided keys.
 pub struct MapBuilder<'a, K> {
     keys: &'a [K],
     seed: Option<u64>,
@@ -67,6 +70,7 @@ impl<'a, K> MapBuilder<'a, K> {
         self
     }
 
+    /// Always try to construct a small map
     pub fn set_force_try_build(&mut self, flag: bool) -> &mut Self {
         self.force_try_build = flag;
         self
@@ -138,7 +142,10 @@ pub struct MapOutput {
     pub index: Box<[usize]>
 }
 
-pub struct OutputBuilder {
+/// Code Generator
+///
+/// Generate code based on the constructed Map and the provided sequence.
+pub struct CodeBuilder {
     name: String,
     hash: String,
     dir: PathBuf,
@@ -205,6 +212,7 @@ struct CountWriter<W> {
 }
 
 impl MapOutput {
+    /// The seed can be saved and used in next compute to keep output stable.
     pub fn seed(&self) -> Option<u64> {
         match &self.kind {
             MapKind::Tiny => None,
@@ -229,7 +237,7 @@ impl MapOutput {
     /// # NOTE
     ///
     /// The provided data must be reordered, otherwise the behavior will be unexpected.
-    pub fn create_map(&self, name: String, data: ReferenceId, builder: &mut OutputBuilder)
+    pub fn create_map(&self, name: String, data: ReferenceId, builder: &mut CodeBuilder)
         -> io::Result<ReferenceId>
     {
         match &self.kind {
@@ -283,13 +291,18 @@ impl MapOutput {
     }
 }
 
-impl OutputBuilder {
+impl CodeBuilder {
+    /// Specifies the name, hash, and directory to use for the output map code.
+    ///
+    /// Note that `hash` must be a fully qualified type path that implements
+    /// the [`HashOne`](crate::phf::HashOne) trait
+    /// and is consistent with the algorithm used by MapBuilder.
     pub fn new(
         name: String,
         hash: String,
         dir: PathBuf,
-    ) -> OutputBuilder {
-        OutputBuilder {
+    ) -> CodeBuilder {
+        CodeBuilder {
             name, hash, dir,
             list: Vec::new(),
             bytes_writer: None,
@@ -336,7 +349,7 @@ impl OutputBuilder {
             }))
         }
     }
-    
+
     pub fn create_custom(&mut self, r#type: String, value: String) -> ReferenceId {
         let id = self.list.len();
         self.list.push(OutputEntry {
@@ -511,7 +524,7 @@ impl OutputBuilder {
         self.create_u32_seq_raw(Some(name), seq)
     }
 
-    pub fn build(self, writer: &mut dyn io::Write) -> io::Result<()> {
+    pub fn write_to(self, writer: &mut dyn io::Write) -> io::Result<()> {
         struct ReferenceEntry {
             r#type: String,
             value: String

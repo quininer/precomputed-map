@@ -21,14 +21,14 @@ fn main() {
         .collect::<Vec<_>>();
 
     match mode.as_deref() {
-        Some("datamap") => datamap(&map),
+        Some("precomputed") => precomputed(&map),
         Some("naive") => naive(&map),
         _ => panic!()
     }
 }
 
 
-fn datamap(map: &[(String, u32)]) {
+fn precomputed(map: &[(String, u32)]) {
     let keys = (0..map.len()).collect::<Vec<usize>>();
     
     let mapout = precomputed_map::builder::MapBuilder::new(&keys)
@@ -42,7 +42,7 @@ fn datamap(map: &[(String, u32)]) {
 
     dbg!(mapout.seed());
 
-    let mut builder = precomputed_map::builder::OutputBuilder::new(
+    let mut builder = precomputed_map::builder::CodeBuilder::new(
         "str2id".into(),
         "precomputed_map::phf::U64Hasher<std::collections::hash_map::DefaultHasher>".into(),
         "examples".into(),
@@ -58,7 +58,7 @@ fn datamap(map: &[(String, u32)]) {
     mapout.create_map("STR2ID_MAP".into(), pair, &mut builder).unwrap();
 
     let mut code_file = fs::File::create("examples/str2id.rs").unwrap();
-    builder.build(&mut code_file).unwrap();
+    builder.write_to(&mut code_file).unwrap();
 
     writeln!(code_file,
         r#"
@@ -99,6 +99,10 @@ fn naive(map: &[(String, u32)]) {
 fn main() {{
     use std::collections::hash_map::DefaultHasher;
     use precomputed_map::phf::{{ HashOne, U64Hasher }};
+
+    let now = std::time::Instant::now();
+    std::sync::LazyLock::force(std::hint::black_box(&STR2ID_MAP));
+    println!("startup: {{:?}}", now.elapsed());
 
     let s = std::hint::black_box({:?});
     let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
