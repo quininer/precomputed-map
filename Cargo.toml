@@ -1,6 +1,6 @@
 [package]
 name = "precomputed-map"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["quininer <quininer@live.com>"]
 description = "Precomputed a Map to embed in binary"
 license = "MIT"

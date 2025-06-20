@@ -101,6 +101,10 @@ where
         D::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized
     {
+        if self.is_empty() {
+            return None;
+        }
+        
         let index = self.inner_get(key);
         if self.data.get_key(index).borrow() == key {
             Some(self.data.get_value(index))
@@ -179,6 +183,10 @@ where
         D::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized
     {
+        if self.is_empty() {
+            return None;
+        }
+        
         let index = self.inner_get(key);
         if self.data.get_key(index).borrow() == key {
             Some(self.data.get_value(index))

@@ -5,6 +5,8 @@ pub trait HashOne {
     fn hash_one<T: Hash>(k: u64, v: T) -> u64;
 }
 
+// private in the next version
+#[doc(hidden)]
 pub fn hash_pilot(k: u64, pilot: u8) -> u64 {
     const C: u64 = 0x517cc1b727220a95;
 

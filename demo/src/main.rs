@@ -28,10 +28,9 @@ fn main() {
     match mode.as_deref() {
         Some("precomputed") => precomputed(&map, hash_only),
         Some("naive") => naive(&map),
-        _ => panic!()
+        _ => panic!("need command")
     }
 }
-
 
 fn precomputed(map: &[(String, u32)], hash_only: bool) {
     let keys = (0..map.len()).collect::<Vec<usize>>();
