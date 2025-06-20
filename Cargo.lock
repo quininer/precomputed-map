@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "static-datamap"
+name = "precomputed-map"
 version = "0.1.0"

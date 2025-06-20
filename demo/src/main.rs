@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::Write;
 use std::collections::hash_map::DefaultHasher;
-use static_datamap::phf::{ HashOne, U64Hasher };
+use precomputed_map::phf::{ HashOne, U64Hasher };
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -31,7 +31,7 @@ fn main() {
 fn datamap(map: &[(String, u32)]) {
     let keys = (0..map.len()).collect::<Vec<usize>>();
     
-    let mapout = static_datamap::builder::MapBuilder::new(&keys)
+    let mapout = precomputed_map::builder::MapBuilder::new(&keys)
         .set_seed(17162376839062016489)
         .set_ord(&|&x, &y| std::cmp::Ord::cmp(&map[x].0, &map[y].0))
         .set_hash(&|seed, &k|
@@ -42,9 +42,9 @@ fn datamap(map: &[(String, u32)]) {
 
     dbg!(mapout.seed());
 
-    let mut builder = static_datamap::builder::OutputBuilder::new(
+    let mut builder = precomputed_map::builder::OutputBuilder::new(
         "str2id".into(),
-        "static_datamap::phf::U64Hasher<std::collections::hash_map::DefaultHasher>".into(),
+        "precomputed_map::phf::U64Hasher<std::collections::hash_map::DefaultHasher>".into(),
         "examples".into(),
     );
 
@@ -64,7 +64,7 @@ fn datamap(map: &[(String, u32)]) {
         r#"
 fn main() {{
     use std::collections::hash_map::DefaultHasher;
-    use static_datamap::phf::{{ HashOne, U64Hasher }};
+    use precomputed_map::phf::{{ HashOne, U64Hasher }};
 
     let s = std::hint::black_box({:?});
     let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
@@ -78,14 +78,12 @@ fn main() {{
         let s = std::hint::black_box(k.as_str());
 
         let now = std::time::Instant::now();
-        for _ in 0..10 {{
-            let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
-            std::hint::black_box(id);
-        }}
-        sum += now.elapsed() / 10;
+        let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
+        sum += now.elapsed();
+        std::hint::black_box(id);
     }}
 
-    println!("{{:?}}", sum);
+    println!("{{:?}}", sum / STR2ID_MAP.len() as u32);
 }}
         "#,
         map[1].0,
@@ -100,7 +98,7 @@ fn naive(map: &[(String, u32)]) {
         r#"
 fn main() {{
     use std::collections::hash_map::DefaultHasher;
-    use static_datamap::phf::{{ HashOne, U64Hasher }};
+    use precomputed_map::phf::{{ HashOne, U64Hasher }};
 
     let s = std::hint::black_box({:?});
     let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
@@ -114,14 +112,12 @@ fn main() {{
         let s = std::hint::black_box(k.as_str());
 
         let now = std::time::Instant::now();
-        for _ in 0..10 {{
-            let id = map_get(std::hint::black_box(&STR2ID_MAP), s);
-            std::hint::black_box(id);
-        }}
-        sum += now.elapsed() / 10;
+        let id = map_get(std::hint::black_box(&STR2ID_MAP), s);
+        sum += now.elapsed();
+        std::hint::black_box(id);
     }}
 
-    println!("{{:?}}", sum);
+    println!("{{:?}}", sum / STR2ID_MAP.len() as u32);
 }}
 
 use std::collections::HashMap;

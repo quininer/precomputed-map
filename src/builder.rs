@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 #[cfg(test)]
 mod tests;
 mod build;
@@ -11,11 +13,14 @@ pub struct MapBuilder<'a, K> {
     keys: &'a [K],
     seed: Option<u64>,
     limit: Option<u64>,
-    ord: Option<&'a dyn Fn(&K, &K) -> cmp::Ordering>,
-    hash: Option<&'a dyn Fn(u64, &K) -> u64>,
-    next_seed: &'a dyn Fn(u64, u64) -> u64,
+    ord: Option<OrdFunc<'a, K>>,
+    hash: Option<HashFunc<'a, K>>,
+    next_seed: fn(u64, u64) -> u64,
     force_try_build: bool,
 }
+
+pub type OrdFunc<'a, K> = &'a dyn Fn(&K, &K) -> cmp::Ordering;
+pub type HashFunc<'a, K> = &'a dyn Fn(u64, &K) -> u64;
 
 impl<'a, K> MapBuilder<'a, K> {
     pub fn new(keys: &'a [K]) -> Self {
@@ -25,7 +30,7 @@ impl<'a, K> MapBuilder<'a, K> {
             seed: None,
             ord: None,
             hash: None,
-            next_seed: &|init_seed, c| {
+            next_seed: |init_seed, c| {
                 use std::hash::BuildHasher;
     
                 std::collections::hash_map::RandomState::new()
@@ -45,17 +50,17 @@ impl<'a, K> MapBuilder<'a, K> {
         self
     }
 
-    pub fn set_ord(&mut self, f: &'a impl Fn(&K, &K) -> cmp::Ordering) -> &mut Self {
+    pub fn set_ord(&mut self, f: OrdFunc<'a, K>) -> &mut Self {
         self.ord = Some(f);
         self
     }
 
-    pub fn set_hash(&mut self, f: &'a impl Fn(u64, &K) -> u64) -> &mut Self {
+    pub fn set_hash(&mut self, f: HashFunc<'a, K>) -> &mut Self {
         self.hash = Some(f);
         self
     }
 
-    pub fn set_next_seed(&mut self, f: &'a (impl Fn(u64, u64) -> u64 + Send + Sync))
+    pub fn set_next_seed(&mut self, f: fn(u64, u64) -> u64)
         -> &mut Self
     {
         self.next_seed = f;
@@ -69,12 +74,19 @@ impl<'a, K> MapBuilder<'a, K> {
 
     pub fn build(&self) -> Result<MapOutput, BuildFailed> {
         if self.keys.len() <= 16 {
+            // For tiny amounts of data, binary search is usually faster.
+            //
+            // At most 4 comparisons will be faster than a high-quality hash.
             if let Some(output) = build::build_tiny(self) {
                 return Ok(output);
             }
         }
 
         if self.force_try_build && self.keys.len() <= 1024 {
+            // For small numbers of keys, try to build the smallest and fastest phf.
+            //
+            // This outperforms all other phfs,
+            // but for large numbers of keys, this may not be able to find the seed in a reasonable time.
             if let Some(output) = build::build_small(self) {
                 return Ok(output);
             }
@@ -87,6 +99,10 @@ impl<'a, K> MapBuilder<'a, K> {
             "));
         }
 
+        // A typical PHF, but not optimized for construction time, and no sharding.
+        // 
+        // It is suitable for large amounts of data that need to be embedded in a binary file,
+        // but for data larger than that it is better to use a specialized PHF library.
         build::build_medium(self)
     }
 }
@@ -201,7 +217,7 @@ impl MapOutput {
     ///
     /// The lengths of provided lists must be equal.    
     pub fn reorder<'list: 'map, 'map, T>(&'map self, list: &'list [T])
-        -> impl Iterator<Item = &'list T> + ExactSizeIterator + 'map
+        -> impl ExactSizeIterator<Item = &'list T> + DoubleEndedIterator + 'map
     {
         assert_eq!(self.index.len(), list.len());
 
@@ -237,7 +253,7 @@ impl MapOutput {
                 let pilots = if pilots.len() > (4 * 1024) {
                     let writer = builder.bytes_writer()?;
                     let offset = writer.count;
-                    writer.write_all(&pilots)?;
+                    writer.write_all(pilots)?;
                     let len = writer.count - offset;
 
                     let id = builder.list.len();
@@ -268,7 +284,7 @@ impl MapOutput {
 }
 
 impl OutputBuilder {
-    pub fn new<'w>(
+    pub fn new(
         name: String,
         hash: String,
         dir: PathBuf,
@@ -531,8 +547,8 @@ impl OutputBuilder {
             writeln!(writer,
                 "\
 const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
-    static {name}_BYTES_U32SEQ: static_datamap::aligned::AlignedBytes<{count}, u32> =
-        static_datamap::aligned::AlignedBytes {{
+    static {name}_BYTES_U32SEQ: {crate_name}::aligned::AlignedBytes<{count}, u32> =
+        {crate_name}::aligned::AlignedBytes {{
             align: [],
             bytes: *include_bytes!(\"{file}.u32seq\")
         }};
@@ -540,6 +556,7 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
     &{name}_BYTES_U32SEQ.bytes
 }};\
                 ",
+                crate_name = env!("CARGO_CRATE_NAME"),
                 count = u32seq_count,
                 name = self.name.to_ascii_uppercase(),
                 file = self.name
@@ -559,10 +576,11 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::U8Seq { offset, len } => {
                     let ty = format!(
-                        "static_datamap::store::ConstSlice<'static, {}, {}, [u8; {}]>",
+                        "{crate_name}::store::ConstSlice<'static, {}, {}, [u8; {}]>",
                         offset,
                         len,
                         bytes_count,
+                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let val = format!("<{}>::new({})", ty, bytes);
 
@@ -575,15 +593,17 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::U32Seq { offset, len } => {
                     let data_ty = format!(
-                        "static_datamap::store::ConstSlice<'static, {}, {}, [u8; {}]>",
+                        "{crate_name}::store::ConstSlice<'static, {}, {}, [u8; {}]>",
                         offset,
                         len,
                         u32seq_count,
+                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let ty = format!(
-                        "static_datamap::aligned::AlignedArray<{}, u32, {}>",
+                        "{crate_name}::aligned::AlignedArray<{}, u32, {}>",
                         len,
-                        data_ty
+                        data_ty,
+                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let data_val = format!("<{}>::new({})", data_ty, u32seq);
                     let val = format!("<{}>::new({})", ty, data_val);
@@ -597,16 +617,18 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::BytesSeq { offset, len, index } => {
                     let ty = format!(
-                        "static_datamap::seq::CompactSeq<'static, {}, {}, {}, [u8; {}]>",
+                        "{crate_name}::seq::CompactSeq<'static, {}, {}, {}, [u8; {}]>",
                         offset,
                         len,
                         &list[index.0].r#type,
                         bytes_count,
+                        crate_name = env!("CARGO_CRATE_NAME")
                     );
                     let val = format!(
-                        "static_datamap::seq::CompactSeq::new({}, static_datamap::store::ConstSlice::new({}))",
+                        "{crate_name}::seq::CompactSeq::new({}, {crate_name}::store::ConstSlice::new({}))",
                         &list[index.0].value,
-                        bytes
+                        bytes,
+                        crate_name = env!("CARGO_CRATE_NAME")
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
@@ -615,15 +637,17 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::StrSeq { offset, len, index } => {
                     let ty = format!(
-                        "static_datamap::seq::CompactSeq<'static, {}, {}, {}, str>",
+                        "{crate_name}::seq::CompactSeq<'static, {}, {}, {}, str>",
                         offset,
                         len,
-                        &list[index.0].r#type
+                        &list[index.0].r#type,
+                        crate_name = env!("CARGO_CRATE_NAME")
                     );
                     let val = format!(
-                        "static_datamap::seq::CompactSeq::new({}, static_datamap::store::ConstSlice::new({}))",
+                        "{crate_name}::seq::CompactSeq::new({}, {crate_name}::store::ConstSlice::new({}))",
                         &list[index.0].value,
-                        str_ref
+                        str_ref,
+                        crate_name = env!("CARGO_CRATE_NAME")
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
@@ -631,8 +655,16 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                     ReferenceEntry { r#type: ty, value: entry_name.clone() }                    
                 },
                 OutputKind::List { item_type, value, len } => {
-                    let ty = format!("static_datamap::seq::List<'static, {}, {}>", len, item_type);
-                    let val = format!("static_datamap::seq::List({})", value);
+                    let ty = format!(
+                        "{crate_name}::seq::List<'static, {}, {}>",
+                        len, item_type,
+                        crate_name = env!("CARGO_CRATE_NAME")
+                    );
+                    let val = format!("
+                        {crate_name}::seq::List({})",
+                        value,
+                        crate_name = env!("CARGO_CRATE_NAME")
+                    );
                     
                     if let Some(entry_name) = entry.name.as_ref() {
                         writeln!(writer, "const {}: {} = {};", entry_name, ty, val)?;
@@ -657,13 +689,15 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                 }
                 OutputKind::Tiny(data) => {
                     let ty = format!(
-                        "static_datamap::TinyMap<'static, static_datamap::store::Ordered<{}>>",
-                        &list[data.0].r#type
+                        "{crate_name}::TinyMap<'static, {crate_name}::store::Ordered<{}>>",
+                        &list[data.0].r#type,
+                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let val = format!(
-                        "<{}>::new(static_datamap::store::Ordered({}))",
+                        "<{}>::new({crate_name}::store::Ordered({}))",
                         ty,
                         &list[data.0].value,
+                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
@@ -672,9 +706,10 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::Small { seed, data } => {
                     let ty = format!(
-                        "static_datamap::SmallMap<'static, {}, {}>",
+                        "{crate_name}::SmallMap<'static, {}, {}>",
                         &list[data.0].r#type,
                         self.hash,
+                        crate_name = env!("CARGO_CRATE_NAME"),
                     );
                     let val = format!(
                         "<{}>::new({}, {})",
@@ -689,19 +724,21 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::Medium { seed, slots, pilots, remap, data } => {
                     let ty = format!(
-                        "static_datamap::MediumMap<'static, {}, {}, {}, {}>",
+                        "{crate_name}::MediumMap<'static, {}, {}, {}, {}>",
                         &list[pilots.0].r#type,
                         &list[remap.0].r#type,
                         &list[data.0].r#type,
                         self.hash,
+                        crate_name = env!("CARGO_CRATE_NAME")
                     );
                     let val = format!(
-                        "static_datamap::MediumMap::new({}, {}, {}, {}, {})",
+                        "{crate_name}::MediumMap::new({}, {}, {}, {}, {})",
                         seed,
                         slots,
                         &list[pilots.0].value,
                         &list[remap.0].value,
                         &list[data.0].value,
+                        crate_name = env!("CARGO_CRATE_NAME")
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();

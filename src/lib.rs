@@ -35,6 +35,10 @@ where
         D::LEN
     }
 
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn get<Q>(&self, key: &Q)
         -> Option<D::Value>
     where
@@ -74,6 +78,10 @@ where
     pub const fn len(&self) -> usize {
         D::LEN
     }    
+
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     
     #[inline]
     fn inner_get<Q>(&self, key: &Q) -> usize
@@ -138,6 +146,10 @@ where
         D::LEN
     }    
 
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     #[inline]
     fn inner_get<Q>(&self, key: &Q) -> usize
     where
@@ -150,7 +162,10 @@ where
         let bucket: usize = fast_reduct32(low(hash), pilots_len).try_into().unwrap();
         let pilot = self.pilots.index(bucket);
         let pilot_hash = phf::hash_pilot(self.seed, pilot);
-        let index: usize = fast_reduct32(high(hash) ^ high(pilot_hash) ^ low(pilot_hash), slots_len).try_into().unwrap();
+        let index: usize = fast_reduct32(
+            high(hash) ^ high(pilot_hash) ^ low(pilot_hash),
+            slots_len
+        ).try_into().unwrap();
 
         match index.checked_sub(D::LEN) {
             None => index,
@@ -179,7 +194,7 @@ where
 // https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
 #[inline]
 fn fast_reduct32(x: u32, limit: u32) -> u32 {
-    ((x as u64) * (limit as u64) >> 32) as u32
+    (((x as u64) * (limit as u64)) >> 32) as u32
 }
 
 #[inline]

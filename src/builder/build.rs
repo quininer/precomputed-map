@@ -2,7 +2,9 @@ use std::cmp;
 use crate::{ phf, fast_reduct32, low, high };
 use super::*;
 
-pub(super) fn build_tiny<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
+pub(super) fn build_tiny<K>(builder: &MapBuilder<'_, K>)
+    -> Option<MapOutput>
+{
     let ord = builder.ord.as_ref()?;
 
     let mut index = (0..builder.keys.len()).collect::<Box<[_]>>();
@@ -14,7 +16,9 @@ pub(super) fn build_tiny<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
     }) 
 }
 
-pub(super) fn build_small<K>(builder: &MapBuilder<'_, K>) -> Option<MapOutput> {
+pub(super) fn build_small<K>(builder: &MapBuilder<'_, K>)
+    -> Option<MapOutput>
+{
     let hash = builder.hash.as_ref()?;
     let next_seed = builder.next_seed;
     
@@ -117,10 +121,10 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
         pilots.iter_mut().for_each(|p| *p = 0);
         slots.iter_mut().for_each(|slot| *slot = None);
 
-        if let Some(limit) = builder.limit {
-            if c > limit {
-                break
-            }
+        if let Some(limit) = builder.limit
+            && c > limit
+        {
+            break
         }
 
         hashes.iter_mut()

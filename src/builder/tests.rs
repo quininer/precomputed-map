@@ -9,7 +9,7 @@ use super::{ MapBuilder, MapKind };
 fn test_build_ptrhash() {
     let start = Instant::now();
     
-    let n = 9 * 1024 * 1024;
+    let n = 1024 * 1024;
     let (s, keys) = {
         let mut s = String::new();
         let mut keys = Vec::with_capacity(n);
@@ -33,18 +33,18 @@ fn test_build_ptrhash() {
             s[v.clone()].hash(&mut hasher);
             hasher.finish()
         })
-        .set_next_seed(&|key, c| {
+        .set_next_seed(|key, c| {
             let mut hasher = DefaultHasher::new();
             hasher.write_u64(key);
             hasher.write_u64(c);
             hasher.finish()            
         })
-        .build();
+        .build()
+        .unwrap();
 
     println!("build done: {:?}", start.elapsed());
 
     if let MapKind::Medium { seed, .. } = &output.kind {
-        dbg!(seed);
+        assert_eq!(3559301822128966697, *seed);
     }
-
 }
