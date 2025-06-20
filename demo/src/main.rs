@@ -12,6 +12,9 @@ fn main() {
     let num = args.next()
         .map(|num| num.parse::<u32>().unwrap())
         .unwrap_or(10000);
+    let hash_only = matches!(args.next().as_deref(), Some("hash-only"));
+
+    let _ = fs::create_dir("examples");
 
     let map = (0u32..num)
         .map(|id| {
@@ -23,19 +26,25 @@ fn main() {
         .collect::<Vec<_>>();
 
     match mode.as_deref() {
-        Some("precomputed") => precomputed(&map),
+        Some("precomputed") => precomputed(&map, hash_only),
         Some("naive") => naive(&map),
         _ => panic!()
     }
 }
 
 
-fn precomputed(map: &[(String, u32)]) {
+fn precomputed(map: &[(String, u32)], hash_only: bool) {
     let keys = (0..map.len()).collect::<Vec<usize>>();
+
+    let mut map_builder = precomputed_map::builder::MapBuilder::new(&keys);
+    let ord = |&x: &usize, &y: &usize| map[x].0.cmp(&map[y].0);
+
+    if !hash_only {
+        map_builder.set_ord(&ord);
+    }
     
-    let mapout = precomputed_map::builder::MapBuilder::new(&keys)
+    let mapout = map_builder
         .set_seed(17162376839062016489)
-        .set_ord(&|&x, &y| std::cmp::Ord::cmp(&map[x].0, &map[y].0))
         .set_hash(&|seed, &k|
             <U64Hasher<DefaultHasher>>::hash_one(seed, map[k].0.as_str())
         )

@@ -121,8 +121,9 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
         pilots.iter_mut().for_each(|p| *p = 0);
         slots.iter_mut().for_each(|slot| *slot = None);
 
-        if let Some(limit) = builder.limit
-            && c > limit
+        if builder.limit
+            .filter(|&limit| c > limit)
+            .is_some()
         {
             break
         }
@@ -226,8 +227,9 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
                         values_to_add.push((slot_idx, keys_idx));
                         collision_score += new_score;
 
-                        if let Some((best_score, _)) = best
-                            && collision_score >= best_score
+                        if best
+                            .filter(|(best_score, _)| collision_score >= *best_score)
+                            .is_some()
                         {
                             continue 'pilot
                         }
