@@ -17,6 +17,17 @@ pub struct CompactSeq<
     data: ConstSlice<'data, O, L, BUF>,
 }
 
+pub struct LimitedSeq<
+    'data,
+    const O: usize,
+    const L: usize,
+    SEQ,
+    BUF: ?Sized,
+> {
+    seq: SEQ,
+    data: ConstSlice<'data, O, L, BUF>,
+}
+
 impl<
     'data,
     const O: usize,
@@ -26,6 +37,18 @@ impl<
 > CompactSeq<'data, O, L, SEQ, BUF> {
     pub const fn new(seq: SEQ, data: ConstSlice<'data, O, L, BUF>) -> Self {
         CompactSeq { seq, data }
+    }
+}
+
+impl<
+    'data,
+    const O: usize,
+    const L: usize,
+    SEQ,
+    BUF: ?Sized,
+> LimitedSeq<'data, O, L, SEQ, BUF> {
+    pub const fn new(seq: SEQ, data: ConstSlice<'data, O, L, BUF>) -> Self {
+        LimitedSeq { seq, data }
     }
 }
 
@@ -103,6 +126,57 @@ where
             .try_into()
             .unwrap();
         &self.data.as_data()[start..end]
+    }
+}
+
+impl<
+    'data,
+    const B: usize,
+    const O: usize,
+    const L: usize,
+    SEQ,
+> AccessSeq<'data> for LimitedSeq<'data, O, L, SEQ, [u8; B]>
+where
+    SEQ: AccessSeq<'data, Item = u32>,
+{
+    type Item = &'data [u8];
+
+    const LEN: usize = SEQ::LEN;
+
+    #[inline]
+    fn index(&self, index: usize) -> Self::Item {
+        let id = self.seq.index(index);
+
+        // 24bit offset and 8bit len
+        let offset: usize = (id & ((1 << 24) - 1)).try_into().unwrap();
+        let len: usize = (id >> 24).try_into().unwrap();
+
+        &self.data.as_data()[offset..][..len]
+    }
+}
+
+impl<
+    'data,
+    const O: usize,
+    const L: usize,
+    SEQ,
+> AccessSeq<'data> for LimitedSeq<'data, O, L, SEQ, str>
+where
+    SEQ: AccessSeq<'data, Item = u32>,
+{
+    type Item = &'data str;
+
+    const LEN: usize = SEQ::LEN;
+
+    #[inline]
+    fn index(&self, index: usize) -> Self::Item {
+        let id = self.seq.index(index);
+
+        // 24bit offset and 8bit len
+        let offset: usize = (id & ((1 << 24) - 1)).try_into().unwrap();
+        let len: usize = (id >> 24).try_into().unwrap();
+
+        &self.data.as_data()[offset..][..len]        
     }
 }
 
