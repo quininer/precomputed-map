@@ -1,9 +1,10 @@
 #![allow(clippy::uninlined_format_args)]
 
+mod hash;
+
 use std::fs;
 use std::io::Write;
-use std::collections::hash_map::DefaultHasher;
-use precomputed_map::phf::{ HashOne, U64Hasher };
+use precomputed_map::phf::HashOne;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -12,13 +13,13 @@ fn main() {
     let num = args.next()
         .map(|num| num.parse::<u32>().unwrap())
         .unwrap_or(10000);
-    let hash_only = matches!(args.next().as_deref(), Some("hash-only"));
+    let hash = args.next();
 
     let _ = fs::create_dir("examples");
 
     let map = (0u32..num)
         .map(|id| {
-            let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id);
+            let hash = hash::Default::hash_one(0, id);
             let k = format!("{:x}{}", hash, id);
             let v = (hash as u32) ^ id;
             (k, v)
@@ -26,26 +27,48 @@ fn main() {
         .collect::<Vec<_>>();
 
     match mode.as_deref() {
-        Some("precomputed") => precomputed(&map, hash_only),
-        Some("naive") => naive(&map),
+        Some("precomputed") => precomputed(&map, hash.as_deref()),
+        Some("naive") => naive(&map, hash.as_deref()),
         _ => panic!("need command")
     }
 }
 
-fn precomputed(map: &[(String, u32)], hash_only: bool) {
+fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
     let keys = (0..map.len()).collect::<Vec<usize>>();
 
     let mut map_builder = precomputed_map::builder::MapBuilder::new(&keys);
     let ord = |&x: &usize, &y: &usize| map[x].0.cmp(&map[y].0);
 
-    if !hash_only {
-        map_builder.set_ord(&ord);
-    }
+    let hashfn = match hash {
+        Some("sip") => hash::Sip::hash_one::<&str>,
+        Some("xx3") => hash::Xx3::hash_one::<&str>,
+        Some("fx") => hash::Fx::hash_one::<&str>,
+        Some("fold") => hash::Fold::hash_one::<&str>,
+        #[cfg(feature = "gxhash")]
+        Some("gx") => hash::Gx::hash_one::<&str>,
+        Some(_) | _ => {
+            if hash.is_some() {
+                eprintln!("unknown hash: {:?}", hash);
+            }
+
+            map_builder.set_ord(&ord);
+            hash::Default::hash_one::<&str>
+        }
+    };
+
+    let hasher = match hash {
+        Some("sip") => "Sip",
+        Some("xx3") => "Xx3",
+        Some("fx") => "Fx",
+        Some("fold") => "Fold",
+        Some("gx") => "Gx",
+        _ => "Default"
+    };
     
     let mapout = map_builder
         .set_seed(17162376839062016489)
         .set_hash(&|seed, &k|
-            <U64Hasher<DefaultHasher>>::hash_one(seed, map[k].0.as_str())
+            hashfn(seed, map[k].0.as_str())
         )
         .build()
         .unwrap();
@@ -54,7 +77,7 @@ fn precomputed(map: &[(String, u32)], hash_only: bool) {
 
     let mut builder = precomputed_map::builder::CodeBuilder::new(
         "str2id".into(),
-        "precomputed_map::phf::U64Hasher<std::collections::hash_map::DefaultHasher>".into(),
+        hasher.into(),
         "examples".into(),
     );
 
@@ -72,10 +95,9 @@ fn precomputed(map: &[(String, u32)], hash_only: bool) {
 
     writeln!(code_file,
         r#"
-fn main() {{
-    use std::collections::hash_map::DefaultHasher;
-    use precomputed_map::phf::{{ HashOne, U64Hasher }};
+include!("../src/hash.rs");
 
+fn main() {{
     let s = std::hint::black_box({:?});
     let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
     assert_eq!(id, {});
@@ -83,7 +105,7 @@ fn main() {{
     let mut sum = std::time::Duration::new(0, 0);
 
     for id in 0..STR2ID_MAP.len() {{
-        let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id as u32);
+        let hash = <Default>::hash_one(0, id as u32);
         let k = format!("{{:x}}{{}}", hash, id);
         let s = std::hint::black_box(k.as_str());
 
@@ -101,11 +123,22 @@ fn main() {{
     ).unwrap();
 }
 
-fn naive(map: &[(String, u32)]) {
+fn naive(map: &[(String, u32)], hash: Option<&str>) {
     let mut code_file = fs::File::create("examples/str2id_naive.rs").unwrap();
+
+    let hasher = match hash {
+        Some("sip") => "siphasher::sip::SipHasher13",
+        Some("xx3") => "xxhash_rust::xx3::Xx3",
+        Some("fx") => "fxhash::FxHasher64",
+        Some("fold") => "foldhash::fast::FoldHasher",
+        Some("gx") => "gxhash::GxHasher",
+        _ => "std::collections::hash_map::DefaultHasher"
+    };    
 
     writeln!(code_file,
         r#"
+use std::hash::BuildHasherDefault;
+        
 fn main() {{
     use std::collections::hash_map::DefaultHasher;
     use precomputed_map::phf::{{ HashOne, U64Hasher }};
@@ -137,7 +170,7 @@ fn main() {{
 use std::collections::HashMap;
 
 #[inline(never)]
-fn map_get(map: &HashMap<&'static str, u32>, s: &str) -> Option<u32> {{
+fn map_get(map: &HashMap<&'static str, u32, BuildHasherDefault<{hasher}>>, s: &str) -> Option<u32> {{
     map.get(s).copied()
 }}
 
@@ -155,7 +188,7 @@ static STR2ID_DATA: &'static [(&'static str, u32)] = &[
         r#"
 ];
 
-static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static str, u32>> = std::sync::LazyLock::new(||
+static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static str, u32, BuildHasherDefault<{hasher}>>> = std::sync::LazyLock::new(||
     STR2ID_DATA    
         .into_iter()
         .copied()

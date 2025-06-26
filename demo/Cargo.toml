@@ -5,6 +5,11 @@ edition = "2024"
 
 [dependencies]
 precomputed-map = { path = "..", features = [ "builder" ] }
+siphasher = "1"
+xxhash-rust = { version = "0.8", features = [ "xxh3" ] }
+fxhash = "0.2"
+foldhash = "0.1"
+gxhash = { version = "3", optional = true }
 
 [profile.release]
 debug = true
