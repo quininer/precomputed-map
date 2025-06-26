@@ -233,3 +233,19 @@ impl<'iter, 'data, D> Clone for MapIter<'iter, 'data, D> {
         }
     }
 }
+
+impl<'data, const N: usize> AsData for &'data [u8; N] {
+    type Data = &'data [u8; N];
+
+    fn as_data(&self) -> Self::Data {
+        *self
+    }
+}
+
+impl<'data> AsData for &'data str {
+    type Data = &'data str;
+
+    fn as_data(&self) -> Self::Data {
+        *self
+    }
+}

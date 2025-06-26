@@ -17,15 +17,9 @@ pub struct CompactSeq<
     data: ConstSlice<'data, O, L, BUF>,
 }
 
-pub struct LimitedSeq<
-    'data,
-    const O: usize,
-    const L: usize,
-    SEQ,
-    BUF: ?Sized,
-> {
+pub struct LimitedSeq<SEQ, BUF> {
     seq: SEQ,
-    data: ConstSlice<'data, O, L, BUF>,
+    data: BUF,
 }
 
 impl<
@@ -40,14 +34,8 @@ impl<
     }
 }
 
-impl<
-    'data,
-    const O: usize,
-    const L: usize,
-    SEQ,
-    BUF: ?Sized,
-> LimitedSeq<'data, O, L, SEQ, BUF> {
-    pub const fn new(seq: SEQ, data: ConstSlice<'data, O, L, BUF>) -> Self {
+impl<SEQ, BUF> LimitedSeq<SEQ, BUF> {
+    pub const fn new(seq: SEQ, data: BUF) -> Self {
         LimitedSeq { seq, data }
     }
 }
@@ -129,38 +117,7 @@ where
     }
 }
 
-impl<
-    'data,
-    const B: usize,
-    const O: usize,
-    const L: usize,
-    SEQ,
-> AccessSeq<'data> for LimitedSeq<'data, O, L, SEQ, [u8; B]>
-where
-    SEQ: AccessSeq<'data, Item = u32>,
-{
-    type Item = &'data [u8];
-
-    const LEN: usize = SEQ::LEN;
-
-    #[inline]
-    fn index(&self, index: usize) -> Self::Item {
-        let id = self.seq.index(index);
-
-        // 24bit offset and 8bit len
-        let offset: usize = (id & ((1 << 24) - 1)).try_into().unwrap();
-        let len: usize = (id >> 24).try_into().unwrap();
-
-        &self.data.as_data()[offset..][..len]
-    }
-}
-
-impl<
-    'data,
-    const O: usize,
-    const L: usize,
-    SEQ,
-> AccessSeq<'data> for LimitedSeq<'data, O, L, SEQ, str>
+impl<'data, SEQ> AccessSeq<'data> for LimitedSeq<SEQ, &'data str>
 where
     SEQ: AccessSeq<'data, Item = u32>,
 {
@@ -170,11 +127,10 @@ where
 
     #[inline]
     fn index(&self, index: usize) -> Self::Item {
-        let id = self.seq.index(index);
+        let id = LimitedStr(self.seq.index(index));
 
-        // 24bit offset and 8bit len
-        let offset: usize = (id & ((1 << 24) - 1)).try_into().unwrap();
-        let len: usize = (id >> 24).try_into().unwrap();
+        let offset = id.offset();
+        let len = id.len();
 
         &self.data.as_data()[offset..][..len]        
     }
@@ -196,4 +152,20 @@ where
     fn index(&self, index: usize) -> Self::Item {
         self.get(index).unwrap()
     }
+}
+
+/// Limited static string ID
+/// 
+/// 24bit offset and 8bit length
+#[derive(Clone, Copy)]
+pub struct LimitedStr(pub u32);
+
+impl LimitedStr {
+    pub fn offset(self) -> usize {
+        (self.0 & ((1 << 24) - 1)).try_into().unwrap()
+    }
+
+    pub fn len(self) -> usize {
+        (self.0 >> 24).try_into().unwrap()
+    }    
 }
