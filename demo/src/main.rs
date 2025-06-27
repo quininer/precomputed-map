@@ -40,19 +40,19 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
     let ord = |&x: &usize, &y: &usize| map[x].0.cmp(&map[y].0);
 
     let hashfn = match hash {
-        Some("sip") => hash::Sip::hash_one::<&str>,
-        Some("xx3") => hash::Xx3::hash_one::<&str>,
-        Some("fx") => hash::Fx::hash_one::<&str>,
-        Some("fold") => hash::Fold::hash_one::<&str>,
+        Some("sip") => hash::Sip::hash_one::<&[u8]>,
+        Some("xx3") => hash::Xx3::hash_one::<&[u8]>,
+        Some("fx") => hash::Fx::hash_one::<&[u8]>,
+        Some("fold") => hash::Fold::hash_one::<&[u8]>,
         #[cfg(feature = "gxhash")]
-        Some("gx") => hash::Gx::hash_one::<&str>,
+        Some("gx") => hash::Gx::hash_one::<&[u8]>,
         Some(_) | _ => {
             if hash.is_some() {
                 eprintln!("unknown hash: {:?}", hash);
             }
 
             map_builder.set_ord(&ord);
-            hash::Default::hash_one::<&str>
+            hash::Default::hash_one::<&[u8]>
         }
     };
 
@@ -68,7 +68,7 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
     let mapout = map_builder
         .set_seed(17162376839062016489)
         .set_hash(&|seed, &k|
-            hashfn(seed, map[k].0.as_str())
+            hashfn(seed, map[k].0.as_bytes())
         )
         .build()
         .unwrap();
@@ -81,10 +81,10 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
         "examples".into(),
     );
 
-    let k = mapout.reorder(map).map(|(k, _)| k.as_str());
+    let k = mapout.reorder(map).map(|(k, _)| k.as_bytes());
     let v = mapout.reorder(map).map(|(_, v)| *v);
 
-    let k = builder.create_str_seq("STR2ID_STR".into(), k).unwrap();
+    let k = builder.create_bytes_seq("STR2ID_STR".into(), k).unwrap();
     let v = builder.create_u32_seq("STR2ID_ID".into(), v).unwrap();
     let pair = builder.create_pair(k, v);
 
@@ -98,21 +98,28 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
 include!("../src/hash.rs");
 
 fn main() {{
+    use std::fmt::Write;
+
     let s = std::hint::black_box({:?});
-    let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
+    let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
     assert_eq!(id, {});
 
     let mut sum = std::time::Duration::new(0, 0);
+    let mut buf = String::new();
 
     for id in 0..STR2ID_MAP.len() {{
         let hash = <Default>::hash_one(0, id as u32);
-        let k = format!("{{:x}}{{}}", hash, id);
-        let s = std::hint::black_box(k.as_str());
+        buf.clear();
+        write!(buf, "{{:x}}{{}}", hash, id).unwrap();
+        let k = &buf;
+        let s = std::hint::black_box(k.as_bytes());
 
         let now = std::time::Instant::now();
-        let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
-        sum += now.elapsed();
-        std::hint::black_box(id);
+        for _ in 0..10 {{
+            let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
+            std::hint::black_box(id);
+        }}
+        sum += now.elapsed() / 10;
     }}
 
     println!("{{:?}}", sum / STR2ID_MAP.len() as u32);
@@ -128,8 +135,8 @@ fn naive(map: &[(String, u32)], hash: Option<&str>) {
 
     let hasher = match hash {
         Some("sip") => "siphasher::sip::SipHasher13",
-        Some("xx3") => "xxhash_rust::xx3::Xx3",
-        Some("fx") => "fxhash::FxHasher64",
+        Some("xx3") => "xxhash_rust::xxh3::Xxh3",
+        Some("fx") => "rustc_hash::FxHasher",
         Some("fold") => "foldhash::fast::FoldHasher",
         Some("gx") => "gxhash::GxHasher",
         _ => "std::collections::hash_map::DefaultHasher"
@@ -140,6 +147,7 @@ fn naive(map: &[(String, u32)], hash: Option<&str>) {
 use std::hash::BuildHasherDefault;
         
 fn main() {{
+    use std::fmt::Write;
     use std::collections::hash_map::DefaultHasher;
     use precomputed_map::phf::{{ HashOne, U64Hasher }};
 
@@ -152,16 +160,21 @@ fn main() {{
     assert_eq!(*id, {});
 
     let mut sum = std::time::Duration::new(0, 0);
+    let mut buf = String::new();
 
     for id in 0..STR2ID_MAP.len() {{
         let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id as u32);
-        let k = format!("{{:x}}{{}}", hash, id);
+        buf.clear();
+        write!(buf, "{{:x}}{{}}", hash, id).unwrap();
+        let k = &buf;
         let s = std::hint::black_box(k.as_str());
 
         let now = std::time::Instant::now();
-        let id = map_get(std::hint::black_box(&STR2ID_MAP), s);
-        sum += now.elapsed();
-        std::hint::black_box(id);
+        for _ in 0..10 {{
+            let id = map_get(std::hint::black_box(&STR2ID_MAP), s);
+            std::hint::black_box(id);
+        }}
+        sum += now.elapsed() / 10;
     }}
 
     println!("{{:?}}", sum / STR2ID_MAP.len() as u32);

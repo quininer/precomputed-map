@@ -727,16 +727,16 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                 },
                 OutputKind::Medium { seed, slots, pilots, remap, data } => {
                     let ty = format!(
-                        "{crate_name}::MediumMap<'static, {}, {}, {}, {}>",
+                        "{crate_name}::MediumMap<'static, {}, {}, {}, {}, {}>",
+                        slots,
                         &list[pilots.0].r#type,
                         &list[remap.0].r#type,
                         &list[data.0].r#type,
                         self.hash,
                     );
                     let val = format!(
-                        "{crate_name}::MediumMap::new({}, {}, {}, {}, {})",
+                        "{crate_name}::MediumMap::new({}, {}, {}, {})",
                         seed,
-                        slots,
                         &list[pilots.0].value,
                         &list[remap.0].value,
                         &list[data.0].value,

@@ -34,6 +34,8 @@ where
         let size = mem::size_of::<u32>();
         let index = index * size;
 
+        debug_assert!(self.bytes.as_data().as_ptr().cast::<u32>().is_aligned());
+
         if B >= index + size {
             let buf = self.bytes.as_data()[index..][..size].try_into().unwrap();
             Some(u32::from_le_bytes(buf))

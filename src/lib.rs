@@ -121,16 +121,19 @@ where
 /// Medium map
 ///
 /// 1024..10M
-pub struct MediumMap<'data, P, R, D, H> {
+pub struct MediumMap<'data, const S: usize, P, R, D, H> {
     seed: u64,
-    slots: u32,
     pilots: P,
     remap: R,
     data: D,
-    _phantom: PhantomData<&'data (P, D, R, H)>
+    _phantom: PhantomData<&'data (P, D, R, H, [u8; S])>
 }
 
-impl<'data, P, R, D, H> MediumMap<'data, P, R, D, H>
+impl<
+    'data,
+    const S: usize,
+    P, R, D, H
+> MediumMap<'data, S, P, R, D, H>
 where
     P: AccessSeq<'data, Item = u8>,
     R: AccessSeq<'data, Item = u32>,
@@ -138,14 +141,18 @@ where
     D::Key: Hash + Eq + Copy,
     H: HashOne
 {
-    pub const fn new(seed: u64, slots: u32, pilots: P, remap: R, data: D)
-        -> MediumMap<'data, P, R, D, H>
+    pub const fn new(seed: u64, pilots: P, remap: R, data: D)
+        -> MediumMap<'data, S, P, R, D, H>
     {
         MediumMap {
-            seed, slots, pilots, remap, data,
+            seed, pilots, remap, data,
             _phantom: PhantomData
         }
     }
+
+    const _ASSERT: () = if S != D::LEN + R::LEN {
+        panic!();
+    };
 
     pub const fn len(&self) -> usize {
         D::LEN
@@ -160,8 +167,14 @@ where
     where
         Q: Hash + ?Sized
     {
+        #[cold]
+        #[inline(always)]
+        fn remap_index<'data, R: AccessSeq<'data, Item = u32>>(remap: &R, offset: usize) -> u32 {
+            remap.index(offset)
+        }
+        
         let pilots_len: u32 = P::LEN.try_into().unwrap();
-        let slots_len: u32 = self.slots;
+        let slots_len: u32 = S.try_into().unwrap();
         
         let hash = H::hash_one(self.seed, key);
         let bucket: usize = fast_reduct32(low(hash), pilots_len).try_into().unwrap();
@@ -174,7 +187,7 @@ where
 
         match index.checked_sub(D::LEN) {
             None => index,
-            Some(offset) => self.remap.index(offset).try_into().unwrap()
+            Some(offset) => remap_index(&self.remap, offset).try_into().unwrap()
         }
     }
 
