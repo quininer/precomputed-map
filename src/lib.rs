@@ -8,6 +8,10 @@ pub mod seq;
 pub mod aligned;
 pub mod phf;
 
+pub mod seq2;
+pub mod store2;
+pub mod aligned2;
+
 use core::borrow::Borrow;
 use core::hash::Hash;
 use core::marker::PhantomData;
@@ -210,6 +214,98 @@ where
 
     pub const fn iter(&self) -> store::MapIter<'_, 'data, D> {
         store::MapIter::new(&self.data)
+    }    
+}
+
+pub struct MediumMap2<
+    const SLOTS: usize,
+    P,
+    R,
+    D,
+    H,
+> {
+    seed: u64,
+    _phantom: PhantomData<(
+        [u8; SLOTS],
+        P, R, D, H
+    )>
+}
+
+impl<
+    const SLOTS: usize,
+    P,
+    R,
+    D,
+    H,
+> MediumMap2<SLOTS, P, R, D, H>
+where
+    P: store2::AccessSeq<Item = u8>,
+    R: store2::AccessSeq<Item = u32>,
+    D: store2::MapStore,
+    H: HashOne
+{
+    pub const fn new(seed: u64) -> Self {
+        MediumMap2 {
+            seed,
+            _phantom: PhantomData
+        }
+    }
+
+    const _ASSERT: () = if SLOTS != D::LEN + R::LEN {
+        panic!();
+    };
+
+    pub const fn len(&self) -> usize {
+        D::LEN
+    }    
+
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    
+    fn inner_get<Q>(&self, key: &Q) -> usize
+    where
+        Q: Hash + ?Sized
+    {
+        #[cold]
+        #[inline(always)]
+        fn remap_index<R: store2::AccessSeq<Item = u32>>(offset: usize) -> u32 {
+            R::index(offset)
+        }
+
+        let pilots_len: u32 = P::LEN.try_into().unwrap();
+        let slots_len: u32 = SLOTS.try_into().unwrap();
+
+        let hash = H::hash_one(self.seed, key);
+        let bucket: usize = fast_reduct32(low(hash), pilots_len).try_into().unwrap();
+        let pilot = P::index(bucket);
+        let pilot_hash = phf::hash_pilot(self.seed, pilot);
+        let index: usize = fast_reduct32(
+            high(hash) ^ high(pilot_hash) ^ low(pilot_hash),
+            slots_len
+        ).try_into().unwrap();
+
+        match index.checked_sub(D::LEN) {
+            None => index,
+            Some(offset) => remap_index::<R>(offset).try_into().unwrap()
+        }        
+    }
+
+    pub fn get<Q>(&self, key: &Q) -> Option<D::Value>
+    where
+        D::Key: Borrow<Q>,
+        Q: Hash + Eq + ?Sized
+    {
+        if self.is_empty() {
+            return None;
+        }
+        
+        let index = self.inner_get(key);
+        if D::get_key(index).borrow() == key {
+            Some(D::get_value(index))
+        } else {
+            None
+        }
     }    
 }
 
