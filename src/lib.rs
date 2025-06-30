@@ -8,6 +8,7 @@ pub mod seq;
 pub mod aligned;
 pub mod phf;
 
+pub mod macros;
 pub mod seq2;
 pub mod store2;
 pub mod aligned2;

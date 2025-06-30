@@ -17,18 +17,6 @@ pub struct CompactSeq<
     data: ConstSlice<'data, O, L, BUF>,
 }
 
-impl<
-    'data,
-    const O: usize,
-    const L: usize,
-    SEQ,
-    BUF: ?Sized,
-> CompactSeq<'data, O, L, SEQ, BUF> {
-    pub const fn new(seq: SEQ, data: ConstSlice<'data, O, L, BUF>) -> Self {
-        CompactSeq { seq, data }
-    }
-}
-
 impl<'data, const N: usize, T: Copy> AccessSeq<'data> for List<'data, N, T> {
     type Item = T;
 

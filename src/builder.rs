@@ -255,7 +255,7 @@ impl MapOutput {
                 Ok(ReferenceId(id))                
             },
             MapKind::Medium { seed, slots, pilots, remap } => {
-                let pilots = if pilots.len() > (4 * 1024) {
+                let pilots = if pilots.len() > (4 * 1024) || true {
                     let writer = builder.bytes_writer()?;
                     let offset = writer.count;
                     writer.write_all(pilots)?;
@@ -411,7 +411,7 @@ impl CodeBuilder {
         SEQ: Iterator<Item = B> + ExactSizeIterator,
         B: AsRef<[u8]>
     {
-        if seq.len() > 128 {
+        if seq.len() > 128 || true {
             let writer = self.bytes_writer()?;
             let offset = writer.count;
             let mut count = 0;
@@ -444,7 +444,7 @@ impl CodeBuilder {
         SEQ: Iterator<Item = B> + ExactSizeIterator,
         B: AsRef<str>
     {
-        if seq.len() > 128 {
+        if seq.len() > 128 || true {
             let writer = self.str_writer()?;
             let offset = writer.count;
             let mut count = 0;
@@ -500,7 +500,7 @@ impl CodeBuilder {
     where
         SEQ: Iterator<Item = u32> + ExactSizeIterator
     {
-        if seq.len() > (4 * 1024) {
+        if seq.len() > (4 * 1024) || true {
             let writer = self.u32seq_writer()?;
             let offset = writer.count;
             for n in seq {
@@ -530,7 +530,6 @@ impl CodeBuilder {
     pub fn write_to(self, writer: &mut dyn io::Write) -> io::Result<()> {
         struct ReferenceEntry {
             r#type: String,
-            value: String
         }
 
         let crate_name = env!("CARGO_CRATE_NAME");
@@ -543,7 +542,7 @@ impl CodeBuilder {
             .unwrap_or_default();
         if bytes_count != 0 {
             writeln!(writer,
-                r#"const STATIC_{name}_BYTES: &'static [u8; {count}] = include_bytes!("{file}.bytes");"#,
+                r#"{crate_name}::define!(const STATIC_{name}_BYTES: &[u8; {count}] = "{file}.bytes");"#,
                 count = bytes_count,
                 name = self.name.to_ascii_uppercase(),
                 file = self.name
@@ -566,17 +565,7 @@ impl CodeBuilder {
             .unwrap_or_default();
         if u32seq_count != 0 {
             writeln!(writer,
-                "\
-const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
-    static {name}_BYTES_U32SEQ: {crate_name}::aligned::AlignedBytes<{count}, u32> =
-        {crate_name}::aligned::AlignedBytes {{
-            align: [],
-            bytes: *include_bytes!(\"{file}.u32seq\")
-        }};
-
-    &{name}_BYTES_U32SEQ.bytes
-}};\
-                ",
+                r#"{crate_name}::define!(const STATIC_{name}_U32SEQ_BYTES: &[u32; {count}] = "{file}.u32seq");"#,
                 count = u32seq_count,
                 name = self.name.to_ascii_uppercase(),
                 file = self.name
@@ -585,149 +574,91 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
 
         let bytes = format!("STATIC_{}_BYTES", self.name.to_ascii_uppercase());
         let str_ref = format!("STATIC_{}_STR", self.name.to_ascii_uppercase());
-        let u32seq = format!("STATIC_{}_U32SEQ", self.name.to_ascii_uppercase());
+        let u32seq = format!("STATIC_{}_U32SEQ_BYTES", self.name.to_ascii_uppercase());
         let mut list: Vec<ReferenceEntry> = Vec::with_capacity(self.list.len());
 
         for entry in &self.list {
             let entry = match &entry.kind {
                 OutputKind::Custom { r#type, value } => ReferenceEntry {
                     r#type: r#type.clone(),
-                    value: value.clone()
                 },
                 OutputKind::U8Seq { offset, len } => {
                     let ty = format!(
-                        "{crate_name}::store::ConstSlice<'static, {}, {}, [u8; {}]>",
+                        "{crate_name}::store2::SliceData<{}, {}, {}>",
                         offset,
                         len,
-                        bytes_count,
+                        bytes,
                     );
-                    let val = format!("<{}>::new({})", ty, bytes);
 
                     if let Some(entry_name) = entry.name.as_ref() {
-                        writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
-                        ReferenceEntry { r#type: ty, value: entry_name.clone() }
+                        writeln!(writer, "{vis}type {} = {};", entry_name, ty)?;
+                        ReferenceEntry { r#type: entry_name.clone() }
                     } else {
-                        ReferenceEntry { r#type: ty, value: val }
+                        ReferenceEntry { r#type: ty }
                     }
                 },
                 OutputKind::U32Seq { offset, len } => {
                     let data_ty = format!(
-                        "{crate_name}::store::ConstSlice<'static, {}, {}, [u8; {}]>",
+                        "{crate_name}::store2::SliceData<{}, {}, {}>",
                         offset,
                         len,
-                        u32seq_count,
+                        u32seq,
                     );
                     let ty = format!(
-                        "{crate_name}::aligned::AlignedArray<{}, u32, {}>",
+                        "{crate_name}::aligned2::AlignedArray<{}, u32, {}>",
                         len,
                         data_ty,
                     );
-                    let data_val = format!("<{}>::new({})", data_ty, u32seq);
-                    let val = format!("<{}>::new({})", ty, data_val);
 
                     if let Some(entry_name) = entry.name.as_ref() {
-                        writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
-                        ReferenceEntry { r#type: ty, value: entry_name.clone() }
+                        writeln!(writer, "{vis}type {} = {};", entry_name, ty)?;
+                        ReferenceEntry { r#type: entry_name.clone() }
                     } else {
-                        ReferenceEntry { r#type: ty, value: val }
+                        ReferenceEntry { r#type: ty }
                     }
                 },
                 OutputKind::BytesSeq { offset, len, index } => {
+                    let data_ty = format!(
+                        "{crate_name}::store2::SliceData<{}, {}, {}>",
+                        offset, len, bytes
+                    );
                     let ty = format!(
-                        "{crate_name}::seq::CompactSeq<'static, {}, {}, {}, [u8; {}]>",
+                        "{crate_name}::seq2::CompactSeq<{}, {}>",
+                        &list[index.0].r#type,
+                        data_ty,
+                    );
+
+                    let entry_name = entry.name.as_ref().unwrap();
+                    writeln!(writer, "{vis}type {} = {};", entry_name, ty)?;
+                    ReferenceEntry { r#type: entry_name.clone() }                    
+                },
+                OutputKind::StrSeq { offset, len, index } => {
+                    let ty = format!(
+                        "{crate_name}::seq2::CompactSeq<{}, {}, {}, {}>",
                         offset,
                         len,
                         &list[index.0].r#type,
-                        bytes_count,
-                    );
-                    let val = format!(
-                        "{crate_name}::seq::CompactSeq::new({}, {crate_name}::store::ConstSlice::new({}))",
-                        &list[index.0].value,
                         bytes,
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
-                    ReferenceEntry { r#type: ty, value: entry_name.clone() }                    
+                    writeln!(writer, "{vis}type {} = {};", entry_name, ty)?;
+                    ReferenceEntry { r#type: entry_name.clone() }                    
                 },
-                OutputKind::StrSeq { offset, len, index } => {
-                    let ty = format!(
-                        "{crate_name}::seq::CompactSeq<'static, {}, {}, {}, str>",
-                        offset,
-                        len,
-                        &list[index.0].r#type,
-                    );
-                    let val = format!(
-                        "{crate_name}::seq::CompactSeq::new({}, {crate_name}::store::ConstSlice::new({}))",
-                        &list[index.0].value,
-                        str_ref,
-                    );
-
-                    let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
-                    ReferenceEntry { r#type: ty, value: entry_name.clone() }                    
-                },
-                OutputKind::List { item_type, value, len } => {
-                    let ty = format!(
-                        "{crate_name}::seq::List<'static, {}, {}>",
-                        len, item_type,
-                    );
-                    let val = format!("{crate_name}::seq::List({})", value);
-                    
-                    if let Some(entry_name) = entry.name.as_ref() {
-                        writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
-                        ReferenceEntry { r#type: ty, value: entry_name.clone() }
-                    } else {
-                        ReferenceEntry { r#type: ty, value: val }
-                    }
-                },
+                OutputKind::List { item_type, value, len } => todo!(),
                 OutputKind::Pair { keys, values } => {
                     let ty = format!(
                         "({}, {})",
                         &list[keys.0].r#type,
                         &list[values.0].r#type,
                     );
-                    let val = format!(
-                        "({}, {})",
-                        &list[keys.0].value,
-                        &list[values.0].value,
-                    );
-                    
-                    ReferenceEntry { r#type: ty, value: val }                    
+                    ReferenceEntry { r#type: ty }                    
                 }
-                OutputKind::Tiny(data) => {
-                    let ty = format!(
-                        "{crate_name}::TinyMap<'static, {crate_name}::store::Ordered<{}>>",
-                        &list[data.0].r#type,
-                    );
-                    let val = format!(
-                        "{crate_name}::TinyMap::new({crate_name}::store::Ordered({}))",
-                        &list[data.0].value,
-                    );
-
-                    let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "{vis}static {}: {} = {};", entry_name, ty, val)?;
-                    ReferenceEntry { r#type: ty, value: entry_name.clone() }
-                },
-                OutputKind::Small { seed, data } => {
-                    let ty = format!(
-                        "{crate_name}::SmallMap<'static, {}, {}>",
-                        &list[data.0].r#type,
-                        self.hash,
-                    );
-                    let val = format!(
-                        "{crate_name}::SmallMap::new({}, {})",
-                        seed,
-                        &list[data.0].value,
-                    );
-
-                    let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "{vis}static {}: {} = {};", entry_name, ty, val)?;
-                    ReferenceEntry { r#type: ty, value: entry_name.clone() }
-                },
+                OutputKind::Tiny(data) => todo!(),
+                OutputKind::Small { seed, data } => todo!(),
                 OutputKind::Medium { seed, slots, pilots, remap, data } => {
                     let ty = format!(
-                        "{crate_name}::MediumMap<'static, {}, {}, {}, {}, {}>",
+                        "{crate_name}::MediumMap2<{}, {}, {}, {}, {}>",
                         slots,
                         &list[pilots.0].r#type,
                         &list[remap.0].r#type,
@@ -735,16 +666,13 @@ const STATIC_{name}_U32SEQ: &[u8; {count}] = {{
                         self.hash,
                     );
                     let val = format!(
-                        "{crate_name}::MediumMap::new({}, {}, {}, {})",
+                        "{crate_name}::MediumMap2::new({})",
                         seed,
-                        &list[pilots.0].value,
-                        &list[remap.0].value,
-                        &list[data.0].value,
                     );
 
                     let entry_name = entry.name.as_ref().unwrap();
-                    writeln!(writer, "{vis}static {}: {} = {};", entry_name, ty, val)?;
-                    ReferenceEntry { r#type: ty, value: entry_name.clone() }
+                    writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
+                    ReferenceEntry { r#type: entry_name.clone() }
                 },
             };
 

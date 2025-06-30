@@ -23,10 +23,6 @@ where
 
         B / mem::size_of::<u32>()
     };
-
-    pub const fn new() -> Self {
-        AlignedArray { _phantom: PhantomData }
-    }
     
     #[inline]
     pub fn get(index: usize) -> Option<u32> {

@@ -34,17 +34,6 @@ impl<
     const O: usize,
     const L: usize,
     D: AsData<Data = [u8; B]>
-> SliceData<O, L, D> {
-    pub const fn new() -> Self {
-        SliceData(PhantomData)
-    }
-}
-
-impl<
-    const B: usize,
-    const O: usize,
-    const L: usize,
-    D: AsData<Data = [u8; B]>
 > AsData for SliceData<O, L, D> {
     type Data = [u8; L];
 
