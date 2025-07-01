@@ -48,7 +48,7 @@ where
     const LEN: usize = Self::ARRARY_LEN;
 
     #[inline(always)]
-    fn index(index: usize) -> Self::Item {
-        Self::get(index).unwrap()
+    fn index(index: usize) -> Option<Self::Item> {
+        Self::get(index)
     }
 }

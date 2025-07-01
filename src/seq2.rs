@@ -4,12 +4,6 @@ use crate::store2::{ AsData, AccessSeq };
 
 pub struct CompactSeq<SEQ, BUF>(PhantomData<(SEQ, BUF)>);
 
-impl<SEQ, BUF> CompactSeq<SEQ, BUF> {
-    pub const fn new() -> Self {
-        CompactSeq(PhantomData)
-    }
-}
-
 impl<
     const B: usize,
     SEQ,
@@ -24,15 +18,14 @@ where
     const LEN: usize = SEQ::LEN;
 
     #[inline(always)]
-    fn index(index: usize) -> Self::Item {
-        let start: usize = index.checked_sub(1)
-            .map(|index| SEQ::index(index))
-            .unwrap_or_default()
+    fn index(index: usize) -> Option<Self::Item> {
+        let start: usize = match index.checked_sub(1) {
+            Some(index) => SEQ::index(index)?.try_into().unwrap(),
+            None => 0
+        };
+        let end: usize = SEQ::index(index)?
             .try_into()
             .unwrap();
-        let end: usize = SEQ::index(index)
-            .try_into()
-            .unwrap();
-        &BUF::as_data()[start..end]
+        BUF::as_data().get(start..end)
     }
 }

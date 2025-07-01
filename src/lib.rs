@@ -274,7 +274,7 @@ where
 
         let hash = H::hash_one(self.seed, key);
         let bucket: usize = fast_reduct32(low(hash), pilots_len).try_into().unwrap();
-        let pilot = P::index(bucket);
+        let pilot = P::index(bucket).unwrap();
         let pilot_hash = phf::hash_pilot(self.seed, pilot);
 
         fast_reduct32(
@@ -298,9 +298,9 @@ where
             D::Key: Borrow<Q>,
             Q: Eq + ?Sized,
         {
-            let index: usize = R::index(index - D::LEN).try_into().unwrap();
-            if PartialEq::eq(D::get_key(index).borrow(), key) {
-                Some(D::get_value(index))
+            let index: usize = R::index(index - D::LEN).unwrap().try_into().unwrap();
+            if PartialEq::eq(D::get_key(index)?.borrow(), key) {
+                D::get_value(index)
             } else {
                 None
             }
@@ -313,8 +313,8 @@ where
         let index = self.inner_get(key);
 
         if index < D::LEN {
-            if PartialEq::eq(D::get_key(index).borrow(), key) {
-                Some(D::get_value(index))
+            if PartialEq::eq(D::get_key(index)?.borrow(), key) {
+                D::get_value(index)
             } else {
                 None
             }

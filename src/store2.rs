@@ -10,7 +10,7 @@ pub trait AccessSeq {
     type Item;
     const LEN: usize;
 
-    fn index(index: usize) -> Self::Item;
+    fn index(index: usize) -> Option<Self::Item>;
 }
 
 pub trait MapStore {
@@ -19,8 +19,8 @@ pub trait MapStore {
 
     const LEN: usize;
 
-    fn get_key(index: usize) -> Self::Key;
-    fn get_value(index: usize) -> Self::Value;    
+    fn get_key(index: usize) -> Option<Self::Key>;
+    fn get_value(index: usize) -> Option<Self::Value>;    
 }
 
 pub struct SliceData<
@@ -51,8 +51,8 @@ where
     const LEN: usize = B;
 
     #[inline(always)]
-    fn index(index: usize) -> Self::Item {
-        D::as_data()[index]
+    fn index(index: usize) -> Option<Self::Item> {
+        D::as_data().get(index).copied()
     }
 }
 
@@ -66,13 +66,13 @@ where
     const LEN: usize = K::LEN;
 
     #[inline(always)]
-    fn get_key(index: usize) -> Self::Key {
+    fn get_key(index: usize) -> Option<Self::Key> {
         K::index(index)
     }
 
     #[inline(always)]
-    fn get_value(index: usize) -> Self::Value {
-        index
+    fn get_value(index: usize) -> Option<Self::Value> {
+        Some(index)
     }
 }
 
@@ -93,12 +93,12 @@ where
     };
 
     #[inline(always)]
-    fn get_key(index: usize) -> Self::Key {
+    fn get_key(index: usize) -> Option<Self::Key> {
         K::index(index)
     }
 
     #[inline(always)]
-    fn get_value(index: usize) -> Self::Value {
+    fn get_value(index: usize) -> Option<Self::Value> {
         V::index(index)
     }
 }
