@@ -101,6 +101,10 @@ fn main() {{
     use std::fmt::Write;
     use criterion::measurement::Measurement;
 
+    let query = std::env::args()
+        .nth(1)
+        .map(|arg| arg.parse::<u32>().unwrap());
+
     let s = std::hint::black_box({:?});
     let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
     assert_eq!(id, {});
@@ -111,7 +115,8 @@ fn main() {{
 
     for c in 0..10 {{
         for id in 0..STR2ID_MAP.len() {{
-            let hash = <Default>::hash_one(0, id as u32);
+            let id = query.unwrap_or(id as u32);
+            let hash = <Default>::hash_one(0, id);
             buf.clear();
             write!(buf, "{{:x}}{{}}", hash, id).unwrap();
             let k = &buf;
@@ -157,6 +162,10 @@ fn main() {{
     use criterion::measurement::Measurement;
     use precomputed_map::phf::{{ HashOne, U64Hasher }};
 
+    let query = std::env::args()
+        .nth(1)
+        .map(|arg| arg.parse::<u32>().unwrap());    
+
     let now = std::time::Instant::now();
     std::sync::LazyLock::force(std::hint::black_box(&STR2ID_MAP));
     println!("startup: {{:?}}", now.elapsed());
@@ -171,6 +180,7 @@ fn main() {{
 
     for c in 0..10 {{
         for id in 0..STR2ID_MAP.len() {{
+            let id = query.unwrap_or(id as u32);
             let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id as u32);
             buf.clear();
             write!(buf, "{{:x}}{{}}", hash, id).unwrap();

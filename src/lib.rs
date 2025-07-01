@@ -263,7 +263,8 @@ where
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    
+
+    #[inline]    
     fn inner_get<Q>(&self, key: &Q) -> usize
     where
         Q: Hash + ?Sized
@@ -288,6 +289,7 @@ where
         Q: Hash + Eq + ?Sized
     {
         #[cold]
+        #[inline(always)]
         fn remap_and_index<R, D, Q>(index: usize, key: &Q)
         -> Option<D::Value>
         where

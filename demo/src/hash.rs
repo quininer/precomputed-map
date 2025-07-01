@@ -27,7 +27,6 @@ impl HashOne for Xx3 {
 pub struct Fx;
 
 impl HashOne for Fx {
-    #[inline(never)]
     fn hash_one<T: Hash>(k: u64, v: T) -> u64 {
         // FIXME The platform-independent fxhash implementation should be used
         let mut hasher = rustc_hash::FxHasher::with_seed(k as usize);
