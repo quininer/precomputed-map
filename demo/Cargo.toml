@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+criterion = "0.5"
+criterion-cycles-per-byte = "0.6"
 precomputed-map = { path = "..", features = [ "builder" ] }
 siphasher = "1"
 xxhash-rust = { version = "0.8", features = [ "xxh3" ] }

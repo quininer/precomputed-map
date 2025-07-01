@@ -99,30 +99,35 @@ include!("../src/hash.rs");
 
 fn main() {{
     use std::fmt::Write;
+    use criterion::measurement::Measurement;
 
     let s = std::hint::black_box({:?});
     let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
     assert_eq!(id, {});
 
-    let mut sum = std::time::Duration::new(0, 0);
+    let timer = criterion_cycles_per_byte::CyclesPerByte;
+    let mut sum = timer.zero();
     let mut buf = String::new();
 
-    for id in 0..STR2ID_MAP.len() {{
-        let hash = <Default>::hash_one(0, id as u32);
-        buf.clear();
-        write!(buf, "{{:x}}{{}}", hash, id).unwrap();
-        let k = &buf;
-        let s = std::hint::black_box(k.as_bytes());
+    for c in 0..10 {{
+        for id in 0..STR2ID_MAP.len() {{
+            let hash = <Default>::hash_one(0, id as u32);
+            buf.clear();
+            write!(buf, "{{:x}}{{}}", hash, id).unwrap();
+            let k = &buf;
+            let s = std::hint::black_box(k.as_bytes());
 
-        let now = std::time::Instant::now();
-        for _ in 0..10 {{
+            let start = timer.start();
             let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
+            let end = timer.end(start);
+            sum = timer.add(&sum, &end);
             std::hint::black_box(id);
         }}
-        sum += now.elapsed() / 10;
+
+        std::hint::black_box(c);
     }}
 
-    println!("{{:?}}", sum / STR2ID_MAP.len() as u32);
+    println!("{{:?}}", timer.to_f64(&sum) / (STR2ID_MAP.len() * 10) as f64);
 }}
         "#,
         map[1].0,
@@ -149,6 +154,7 @@ use std::hash::BuildHasherDefault;
 fn main() {{
     use std::fmt::Write;
     use std::collections::hash_map::DefaultHasher;
+    use criterion::measurement::Measurement;
     use precomputed_map::phf::{{ HashOne, U64Hasher }};
 
     let now = std::time::Instant::now();
@@ -159,25 +165,29 @@ fn main() {{
     let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
     assert_eq!(*id, {});
 
-    let mut sum = std::time::Duration::new(0, 0);
+    let timer = criterion_cycles_per_byte::CyclesPerByte;
+    let mut sum = timer.zero();
     let mut buf = String::new();
 
-    for id in 0..STR2ID_MAP.len() {{
-        let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id as u32);
-        buf.clear();
-        write!(buf, "{{:x}}{{}}", hash, id).unwrap();
-        let k = &buf;
-        let s = std::hint::black_box(k.as_str());
+    for c in 0..10 {{
+        for id in 0..STR2ID_MAP.len() {{
+            let hash = <U64Hasher<DefaultHasher>>::hash_one(0, id as u32);
+            buf.clear();
+            write!(buf, "{{:x}}{{}}", hash, id).unwrap();
+            let k = &buf;
+            let s = std::hint::black_box(k.as_str());
 
-        let now = std::time::Instant::now();
-        for _ in 0..10 {{
+            let start = timer.start();
             let id = map_get(std::hint::black_box(&STR2ID_MAP), s);
+            let end = timer.end(start);
+            sum = timer.add(&sum, &end);
             std::hint::black_box(id);
         }}
-        sum += now.elapsed() / 10;
+
+        std::hint::black_box(c);
     }}
 
-    println!("{{:?}}", sum / STR2ID_MAP.len() as u32);
+    println!("{{:?}}", timer.to_f64(&sum) / (STR2ID_MAP.len() * 10) as f64);
 }}
 
 use std::collections::HashMap;
