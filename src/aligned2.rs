@@ -24,7 +24,7 @@ where
         B / mem::size_of::<u32>()
     };
     
-    #[inline]
+    #[inline(always)]
     pub fn get(index: usize) -> Option<u32> {
         let size = mem::size_of::<u32>();
         let index = index * size;
@@ -47,6 +47,7 @@ where
     type Item = u32;
     const LEN: usize = Self::ARRARY_LEN;
 
+    #[inline(always)]
     fn index(index: usize) -> Self::Item {
         Self::get(index).unwrap()
     }

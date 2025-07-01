@@ -37,6 +37,7 @@ impl<
 > AsData for SliceData<O, L, D> {
     type Data = [u8; L];
 
+    #[inline(always)]
     fn as_data() -> &'static Self::Data {
         D::as_data()[O..][..L].try_into().unwrap()
     }
@@ -49,6 +50,7 @@ where
     type Item = u8;
     const LEN: usize = B;
 
+    #[inline(always)]
     fn index(index: usize) -> Self::Item {
         D::as_data()[index]
     }
@@ -63,10 +65,12 @@ where
 
     const LEN: usize = K::LEN;
 
+    #[inline(always)]
     fn get_key(index: usize) -> Self::Key {
         K::index(index)
     }
 
+    #[inline(always)]
     fn get_value(index: usize) -> Self::Value {
         index
     }
@@ -88,12 +92,12 @@ where
         K::LEN
     };
 
-    #[inline]
+    #[inline(always)]
     fn get_key(index: usize) -> Self::Key {
         K::index(index)
     }
 
-    #[inline]
+    #[inline(always)]
     fn get_value(index: usize) -> Self::Value {
         V::index(index)
     }

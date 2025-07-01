@@ -268,12 +268,6 @@ where
     where
         Q: Hash + ?Sized
     {
-        #[cold]
-        #[inline(always)]
-        fn remap_index<R: store2::AccessSeq<Item = u32>>(offset: usize) -> u32 {
-            R::index(offset)
-        }
-
         let pilots_len: u32 = P::LEN.try_into().unwrap();
         let slots_len: u32 = SLOTS.try_into().unwrap();
 
@@ -281,15 +275,11 @@ where
         let bucket: usize = fast_reduct32(low(hash), pilots_len).try_into().unwrap();
         let pilot = P::index(bucket);
         let pilot_hash = phf::hash_pilot(self.seed, pilot);
-        let index: usize = fast_reduct32(
+
+        fast_reduct32(
             high(hash) ^ high(pilot_hash) ^ low(pilot_hash),
             slots_len
-        ).try_into().unwrap();
-
-        match index.checked_sub(D::LEN) {
-            None => index,
-            Some(offset) => remap_index::<R>(offset).try_into().unwrap()
-        }        
+        ).try_into().unwrap()
     }
 
     pub fn get<Q>(&self, key: &Q) -> Option<D::Value>
@@ -297,15 +287,37 @@ where
         D::Key: Borrow<Q>,
         Q: Hash + Eq + ?Sized
     {
+        #[cold]
+        fn remap_and_index<R, D, Q>(index: usize, key: &Q)
+        -> Option<D::Value>
+        where
+            R: store2::AccessSeq<Item = u32>,
+            D: store2::MapStore,
+            D::Key: Borrow<Q>,
+            Q: Eq + ?Sized,
+        {
+            let index: usize = R::index(index - D::LEN).try_into().unwrap();
+            if PartialEq::eq(D::get_key(index).borrow(), key) {
+                Some(D::get_value(index))
+            } else {
+                None
+            }
+        }
+                
         if self.is_empty() {
             return None;
         }
         
         let index = self.inner_get(key);
-        if D::get_key(index).borrow() == key {
-            Some(D::get_value(index))
+
+        if index < D::LEN {
+            if PartialEq::eq(D::get_key(index).borrow(), key) {
+                Some(D::get_value(index))
+            } else {
+                None
+            }
         } else {
-            None
+            remap_and_index::<R, D, Q>(index, key)
         }
     }    
 }

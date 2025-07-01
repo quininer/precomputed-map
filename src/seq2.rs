@@ -23,7 +23,7 @@ where
 
     const LEN: usize = SEQ::LEN;
 
-    #[inline]
+    #[inline(always)]
     fn index(index: usize) -> Self::Item {
         let start: usize = index.checked_sub(1)
             .map(|index| SEQ::index(index))
