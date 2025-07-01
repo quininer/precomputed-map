@@ -1,6 +1,6 @@
 use crate::aligned::AlignedArray;
 use crate::store::ConstSlice;
-use crate::AccessSeq;
+use crate::store::AccessSeq;
 use crate::store::AsData;
 
 pub struct List<'data, const N: usize, T>(pub &'data [T; N]);

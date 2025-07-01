@@ -14,48 +14,43 @@ pub mod seq2;
 pub mod store2;
 pub mod aligned2;
 
-use core::borrow::Borrow;
 use core::marker::PhantomData;
 use phf::HashOne;
-use store::{ MapStore, AccessSeq, Searchable };
 use equivalent::{ Equivalent, Comparable, Hashable };
 
 
 /// Tiny map
 ///
 /// 0..16
-pub struct TinyMap<'data, D> {
-    data: D,
-    _phantom: PhantomData<&'data D>
+pub struct TinyMap<K: 'static, V: 'static> {
+    data: &'static [(K, V)],
 }
 
-impl<'data, D> TinyMap<'data, D>
-where
-    D: MapStore<'data> + Searchable<'data>,
-{
-    pub const fn new(data: D) -> TinyMap<'data, D> {
-        TinyMap { data, _phantom: PhantomData }
+impl<K: 'static, V: 'static> TinyMap<K, V> {
+    pub const fn new(data: &'static [(K, V)]) -> TinyMap<K, V> {
+        TinyMap { data }
     }
 
-    pub const fn len(&self) -> usize {
-        D::LEN
+    pub fn len(&self) -> usize {
+        self.data.len()
     }
 
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     pub fn get<Q>(&self, key: &Q)
-        -> Option<D::Value>
+        -> Option<&V>
     where
-        D::Key: Borrow<Q>,
-        Q: Ord + ?Sized
+        Q: Comparable<K> + ?Sized
     {
-        self.data.search(key)
+        self.data.binary_search_by(|k| key.compare(&k.0).reverse())
+            .ok()
+            .map(|idx| &self.data[idx].1)
     }
 
-    pub const fn iter(&self) -> store::MapIter<'_, 'data, D> {
-        store::MapIter::new(&self.data)
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&K, &V)> + '_ {
+        self.data.iter().map(|(k, v)| (k, v))
     }
 }
 
@@ -114,6 +109,10 @@ where
             None
         }
     }
+
+    pub const fn iter(&self) -> store2::MapIter<'_, D> {
+        store2::MapIter::new()
+    }    
 }
 
 /// Medium map
@@ -220,7 +219,11 @@ where
         } else {
             remap_and_index::<R, D, Q>(index, key)
         }
-    }    
+    }
+
+    pub const fn iter(&self) -> store2::MapIter<'_, D> {
+        store2::MapIter::new()
+    }
 }
 
 // https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/

@@ -1,4 +1,3 @@
-use core::borrow::Borrow;
 use core::marker::PhantomData;
 
 pub trait AsData {
@@ -12,14 +11,6 @@ pub trait AccessSeq {
     const LEN: usize;
 
     fn index(index: usize) -> Option<Self::Item>;
-}
-
-pub trait Searchable: MapStore {
-    fn search<Q>(key: &Q) -> Option<Self::Value>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Ord + ?Sized
-    ;
 }
 
 pub trait MapStore {
@@ -109,5 +100,53 @@ where
     #[inline(always)]
     fn get_value(index: usize) -> Option<Self::Value> {
         V::index(index)
+    }
+}
+
+pub struct MapIter<'iter, D> {
+    next: usize,
+    _phantom: PhantomData<&'iter D>
+}
+
+impl<'iter, D> MapIter<'iter, D> {
+    pub(super) const fn new() -> Self {
+        MapIter { next: 0, _phantom: PhantomData }
+    }
+}
+
+impl<'iter, D> Iterator for MapIter<'iter, D>
+where
+    D: MapStore
+{
+    type Item = (D::Key, D::Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next < D::LEN {
+            let k = D::get_key(self.next)?;
+            let v = D::get_value(self.next)?;
+            self.next += 1;
+            Some((k, v))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'iter, D> ExactSizeIterator for MapIter<'iter, D>
+where
+    D: MapStore
+{
+    fn len(&self) -> usize {
+        D::LEN
+    }
+}
+
+impl<'iter, D> Clone for MapIter<'iter, D> {
+    #[inline]
+    fn clone(&self) -> Self {
+        MapIter {
+            next: self.next,
+            _phantom: PhantomData
+        }
     }
 }
