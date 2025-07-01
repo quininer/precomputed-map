@@ -1,3 +1,4 @@
+use core::borrow::Borrow;
 use core::marker::PhantomData;
 
 pub trait AsData {
@@ -11,6 +12,14 @@ pub trait AccessSeq {
     const LEN: usize;
 
     fn index(index: usize) -> Option<Self::Item>;
+}
+
+pub trait Searchable: MapStore {
+    fn search<Q>(key: &Q) -> Option<Self::Value>
+    where
+        Self::Key: Borrow<Q>,
+        Q: Ord + ?Sized
+    ;
 }
 
 pub trait MapStore {
