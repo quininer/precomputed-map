@@ -2,13 +2,13 @@ use std::cmp;
 use crate::{ phf, fast_reduct32, low, high };
 use super::*;
 
-pub(super) fn build_tiny<K>(builder: &MapBuilder<'_, K>)
+pub(super) fn build_tiny<K>(builder: &MapBuilder<'_, K>, keys: &[K])
     -> Option<MapOutput>
 {
     let ord = builder.ord.as_ref()?;
 
-    let mut index = (0..builder.keys.len()).collect::<Box<[_]>>();
-    index.sort_by(|&x, &y| ord(&builder.keys[x], &builder.keys[y]));
+    let mut index = (0..keys.len()).collect::<Box<[_]>>();
+    index.sort_by(|&x, &y| ord(&keys[x], &keys[y]));
 
     Some(MapOutput {
         kind: MapKind::Tiny,
@@ -16,7 +16,7 @@ pub(super) fn build_tiny<K>(builder: &MapBuilder<'_, K>)
     }) 
 }
 
-pub(super) fn build_small<K>(builder: &MapBuilder<'_, K>)
+pub(super) fn build_small<K>(builder: &MapBuilder<'_, K>, keys: &[K])
     -> Option<MapOutput>
 {
     let hash = builder.hash.as_ref()?;
@@ -29,14 +29,14 @@ pub(super) fn build_small<K>(builder: &MapBuilder<'_, K>)
     });
     let mut seed = init_seed;
 
-    let mut hashes = Vec::with_capacity(builder.keys.len());
-    let mut map = vec![None; builder.keys.len()];
-    let keys_len: u32 = builder.keys.len().try_into().unwrap();
+    let mut hashes = Vec::with_capacity(keys.len());
+    let mut map = vec![None; keys.len()];
+    let keys_len: u32 = keys.len().try_into().unwrap();
 
     'search: for c in 0..(128 * 1024) {
         map.iter_mut().for_each(|idx| *idx = None);
         hashes.clear();
-        hashes.extend(builder.keys.iter().map(|v| hash(seed, v)));
+        hashes.extend(keys.iter().map(|v| hash(seed, v)));
 
         for (idx, &v) in hashes.iter().enumerate() {
             let new_idx = fast_reduct32(high(v) ^ low(v), keys_len) as usize;
@@ -58,7 +58,7 @@ pub(super) fn build_small<K>(builder: &MapBuilder<'_, K>)
     })
 }
 
-pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
+pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>, keys: &[K])
     -> Result<MapOutput, BuildFailed>
 {
     #[derive(Default)]
@@ -88,7 +88,7 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
     let alpha = 0.99;
     let lambda = 3.0;
 
-    let keys_len: u32 = builder.keys.len().try_into().unwrap();
+    let keys_len: u32 = keys.len().try_into().unwrap();
     let slots_len = {
         let len = (f64::from(keys_len) / alpha).ceil() as u32;
 
@@ -108,7 +108,7 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
     let mut pilots = vec![0; buckets_len as usize].into_boxed_slice();
     let mut order = (0..buckets_len).collect::<Box<_>>();
     let mut slots = (0..slots_len).map(|_| None).collect::<Box<[_]>>();
-    let mut hashes = vec![0; builder.keys.len()].into_boxed_slice();
+    let mut hashes = vec![0; keys.len()].into_boxed_slice();
     let mut stack = Vec::new();
 
     // since the number is small enough, we just use naive search
@@ -131,7 +131,7 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
         hashes.iter_mut()
             .enumerate()
             .for_each(|(idx, v)| {
-                *v = hash(seed, &builder.keys[idx]);
+                *v = hash(seed, &keys[idx]);
             });
 
         for (idx, &v) in hashes.iter().enumerate() {
@@ -282,7 +282,7 @@ pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>)
             }
         }
 
-        let mut index = vec![0; builder.keys.len()].into_boxed_slice();
+        let mut index = vec![0; keys.len()].into_boxed_slice();
         let mut remap = vec![0; slots.len() - index.len()].into_boxed_slice();
         let mut remap_slots = Vec::new();
 

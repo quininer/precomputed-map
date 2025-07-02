@@ -13,7 +13,6 @@ use std::path::PathBuf;
 ///
 /// Computes an appropriate static map based on the provided keys.
 pub struct MapBuilder<'a, K> {
-    keys: &'a [K],
     seed: Option<u64>,
     limit: Option<u64>,
     ord: Option<OrdFunc<'a, K>>,
@@ -24,10 +23,15 @@ pub struct MapBuilder<'a, K> {
 pub type OrdFunc<'a, K> = &'a dyn Fn(&K, &K) -> cmp::Ordering;
 pub type HashFunc<'a, K> = &'a dyn Fn(u64, &K) -> u64;
 
+impl<'a, K> Default for MapBuilder<'a, K> {
+    fn default() -> Self {
+        MapBuilder::new()
+    }
+}
+
 impl<'a, K> MapBuilder<'a, K> {
-    pub fn new(keys: &'a [K]) -> Self {
+    pub fn new() -> Self {
         MapBuilder {
-            keys,
             limit: None,
             seed: None,
             ord: None,
@@ -70,29 +74,34 @@ impl<'a, K> MapBuilder<'a, K> {
         self
     }
 
-    pub fn build(&self) -> Result<MapOutput, BuildFailed> {
-        if self.keys.len() <= 16 {
+    /// Creates a Map with the specified keys
+    ///
+    /// # NOTE
+    ///
+    /// Note that the keys used must be unique, otherwise the build will not succeed.
+    pub fn build(&self, keys: &[K]) -> Result<MapOutput, BuildFailed> {
+        if keys.len() <= 16 {
             // For tiny amounts of data, binary search is usually faster.
             //
             // At most 4 comparisons will be faster than a high-quality hash.
-            if let Some(output) = build::build_tiny(self) {
+            if let Some(output) = build::build_tiny(self, keys) {
                 return Ok(output);
             }
         }
 
-        if self.keys.len() <= 128 {
+        if keys.len() <= 128 {
             // For small numbers of keys, try to build the smallest and fastest phf.
             //
             // This outperforms all other phfs,
             // but for large numbers of keys, this may not be able to find the seed in a reasonable time.
             //
             // If the keys length is greater than 12, it will usually fallback to medium map.
-            if let Some(output) = build::build_small(self) {
+            if let Some(output) = build::build_small(self, keys) {
                 return Ok(output);
             }
         }
 
-        if self.keys.len() > 10 * 1024 * 1024 {
+        if keys.len() > 10 * 1024 * 1024 {
             return Err(BuildFailed("WARN: \
                 We currently don't have good support for large numbers of keys,\
                 and this construction may be slow or not complete in a reasonable time.\
@@ -103,7 +112,7 @@ impl<'a, K> MapBuilder<'a, K> {
         // 
         // It is suitable for large amounts of data that need to be embedded in a binary file,
         // but for data larger than that it is better to use a specialized PHF library.
-        build::build_medium(self)
+        build::build_medium(self, keys)
     }
 }
 

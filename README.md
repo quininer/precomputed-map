@@ -37,7 +37,7 @@ let keys: &[str] = ...;
 let values: &[str] = ...;
 
 // compute map
-let mapout = precomputed_map::builder::MapBuilder::new(&keys)
+let mapout = precomputed_map::builder::MapBuilder::new()
     .set_seed(prev_seed)
     .set_ord(&|x, y| x.cmp(y))
     .set_hash(&|seed, &k| {
@@ -45,7 +45,7 @@ let mapout = precomputed_map::builder::MapBuilder::new(&keys)
         k.hash(&mut hasher);
         k.finish()
     })
-    .build()
+    .build(&keys)
     .unwrap();
 
 // generate code
@@ -55,8 +55,8 @@ let mut builder = precomputed_map::builder::CodeBuilder::new(
     "src/generated".into(),
 );
 
-let k = builder.create_str_seq("MYMAP_KEYS".into(), mapout.reorder(keys)).unwrap();
-let v = builder.create_str_seq("MYMAP_VALUES".into(), mapout.reorder(values)).unwrap();
+let k = builder.create_str_seq("MyMapKeys".into(), mapout.reorder(keys)).unwrap();
+let v = builder.create_str_seq("MyMapValues".into(), mapout.reorder(values)).unwrap();
 let pair = builder.create_pair(k, v);
 
 mapout.create_map("MYMAP".into(), pair, &mut builder).unwrap();

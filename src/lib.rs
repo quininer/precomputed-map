@@ -24,6 +24,7 @@ pub struct TinyMap<M> {
 }
 
 impl<M: store::Searchable> TinyMap<M> {
+    #[allow(clippy::new_without_default)]
     pub const fn new() -> TinyMap<M> {
         TinyMap { _phantom: PhantomData }
     }

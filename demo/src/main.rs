@@ -36,7 +36,7 @@ fn main() {
 fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
     let keys = (0..map.len()).collect::<Vec<usize>>();
 
-    let mut map_builder = precomputed_map::builder::MapBuilder::new(&keys);
+    let mut map_builder = precomputed_map::builder::MapBuilder::new();
     let ord = |&x: &usize, &y: &usize| map[x].0.cmp(&map[y].0);
 
     let hashfn = match hash {
@@ -70,7 +70,7 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
         .set_hash(&|seed, &k|
             hashfn(seed, map[k].0.as_bytes())
         )
-        .build()
+        .build(&keys)
         .unwrap();
 
     dbg!(mapout.seed());

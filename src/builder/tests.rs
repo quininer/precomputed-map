@@ -25,7 +25,7 @@ fn test_build_ptrhash() {
 
     println!("start: {:?}", start.elapsed());
 
-    let output = MapBuilder::new(&keys)
+    let output = MapBuilder::<std::ops::Range<usize>>::new()
         .set_seed(3559301822128966697)
         .set_hash(&|key, v| {
             let mut hasher = DefaultHasher::new();
@@ -39,7 +39,7 @@ fn test_build_ptrhash() {
             hasher.write_u64(c);
             hasher.finish()            
         })
-        .build()
+        .build(&keys)
         .unwrap();
 
     println!("build done: {:?}", start.elapsed());
