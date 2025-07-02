@@ -125,7 +125,6 @@ pub enum MapKind {
     Small(u64),
     Medium {
         seed: u64,
-        slots: u32,
         pilots: Box<[u8]>,
         remap: Box<[u32]>,
     }
@@ -199,7 +198,6 @@ enum OutputKind {
     },
     Medium {
         seed: u64,
-        slots: u32,
         pilots: ReferenceId,
         remap: ReferenceId,
         data: ReferenceId
@@ -257,7 +255,7 @@ impl MapOutput {
                 });
                 Ok(ReferenceId(id))                
             },
-            MapKind::Medium { seed, slots, pilots, remap } => {
+            MapKind::Medium { seed, pilots, remap } => {
                 let pilots = if pilots.len() > 1024 {
                     let writer = builder.bytes_writer()?;
                     let offset = writer.count;
@@ -281,7 +279,6 @@ impl MapOutput {
                     name: Some(name),
                     kind: OutputKind::Medium {
                         seed: *seed,
-                        slots: *slots,
                         pilots, remap, data
                     }
                 });
@@ -609,10 +606,9 @@ impl CodeBuilder {
                     writeln!(writer, "{vis}const {}: {} = {};", entry_name, ty, val)?;
                     ReferenceEntry { name: entry_name.clone() }
                 },
-                OutputKind::Medium { seed, slots, pilots, remap, data } => {
+                OutputKind::Medium { seed, pilots, remap, data } => {
                     let ty = format!(
-                        "{crate_name}::MediumMap<{}, {}, {}, {}, {}>",
-                        slots,
+                        "{crate_name}::MediumMap<{}, {}, {}, {}>",
                         &list[pilots.0].name,
                         &list[remap.0].name,
                         &list[data.0].name,

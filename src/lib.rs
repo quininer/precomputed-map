@@ -116,7 +116,6 @@ where
 ///
 /// 1024..10M
 pub struct MediumMap<
-    const SLOTS: usize,
     P,
     R,
     D,
@@ -124,18 +123,16 @@ pub struct MediumMap<
 > {
     seed: u64,
     _phantom: PhantomData<(
-        [u8; SLOTS],
         P, R, D, H
     )>
 }
 
 impl<
-    const SLOTS: usize,
     P,
     R,
     D,
     H,
-> MediumMap<SLOTS, P, R, D, H>
+> MediumMap<P, R, D, H>
 where
     P: store::AccessSeq<Item = u8>,
     R: store::AccessSeq<Item = u32>,
@@ -148,10 +145,6 @@ where
             _phantom: PhantomData
         }
     }
-
-    const _ASSERT: () = if SLOTS != D::LEN + R::LEN {
-        panic!();
-    };
 
     pub const fn len(&self) -> usize {
         D::LEN
@@ -167,7 +160,7 @@ where
         Q: Hashable<H> + ?Sized,
     {
         let pilots_len: u32 = P::LEN.try_into().unwrap();
-        let slots_len: u32 = SLOTS.try_into().unwrap();
+        let slots_len: u32 = (D::LEN + R::LEN).try_into().unwrap();
 
         let hash = key.hash(self.seed);
         let bucket: usize = fast_reduct32(low(hash), pilots_len).try_into().unwrap();
