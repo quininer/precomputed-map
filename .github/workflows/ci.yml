@@ -27,6 +27,6 @@ jobs:
     - name: Test tiny
       run: cd demo; cargo run -- precomputed 10; cargo run --example str2id
     - name: Test small
-      run: cd demo; cargo run -- precomputed 10 hash-only; cargo run --example str2id
+      run: cd demo; cargo run -- precomputed 10 fold; cargo run --example str2id
     - name: Test medium
       run: cd demo; cargo run -- precomputed 1000; cargo run --example str2id
