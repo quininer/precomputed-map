@@ -1,118 +1,94 @@
-use core::borrow::Borrow;
 use core::marker::PhantomData;
-use crate::seq::List;
-
+use crate::equivalent::Comparable;
 
 pub trait AsData {
-    type Data;
+    type Data: ?Sized;
     
-    fn as_data(&self) -> Self::Data;
+    fn as_data() -> &'static Self::Data;
 }
 
-pub trait MapStore<'data> {
-    type Key: 'data;
-    type Value: 'data;
-
-    const LEN: usize;
-    
-    fn get_key(&self, index: usize) -> Self::Key;
-    fn get_value(&self, index: usize) -> Self::Value;
-}
-
-pub trait AccessSeq<'data> {
-    type Item: 'data;
+pub trait AccessSeq {
+    type Item;
     const LEN: usize;
 
-    fn index(&self, index: usize) -> Self::Item;
+    fn index(index: usize) -> Option<Self::Item>;
 }
 
-pub trait Searchable<'data>: MapStore<'data> {
-    fn search<Q>(&self, key: &Q) -> Option<Self::Value>
+pub trait Searchable: MapStore {
+    fn search<Q>(query: &Q) -> Option<usize>
     where
-        Self::Key: Borrow<Q>,
-        Q: Ord + ?Sized
-    ;
+        Q: Comparable<Self::Key> + ?Sized;
 }
 
-pub struct ConstSlice<'data, const O: usize, const L: usize, B: ?Sized> {
-    data: &'data B,
-    _phantom: PhantomData<([u8; O], [u8; L])>
+pub trait MapStore {
+    type Key;
+    type Value;
+
+    const LEN: usize;
+
+    fn get_key(index: usize) -> Option<Self::Key>;
+    fn get_value(index: usize) -> Option<Self::Value>;    
 }
 
-pub struct Ordered<D>(pub D);
-
-impl<'data, const O: usize, const L: usize, B: ?Sized> ConstSlice<'data, O, L, B> {
-    pub const fn new(data: &'data B) -> Self {
-        ConstSlice { data, _phantom: PhantomData }
-    }
-}
-
-impl<
-    'data,
-    const B: usize,
+pub struct SliceData<
     const O: usize,
-    const N: usize,
-> AsData for ConstSlice<'data, O, N, [u8; B]> {
-    type Data = &'data [u8; N];
-    
-    #[inline]
-    fn as_data(&self) -> &'data [u8; N] {
-        self.data[O..][..N].try_into().unwrap()
-    }
-}
+    const L: usize,
+    D
+>(PhantomData<([u8; O], [u8; L], D)>);
 
 impl<
-    'data,
-    const O: usize,
-    const N: usize,
-> AsData for ConstSlice<'data, O, N, str> {
-    type Data = &'data str;
-    
-    #[inline]
-    fn as_data(&self) -> &'data str {
-        self.data[O..][..N].try_into().unwrap()
-    }
-}
-
-impl<
-    'data,
     const B: usize,
     const O: usize,
     const L: usize,
-> AccessSeq<'data> for ConstSlice<'data, O, L, [u8; B]> {
-    type Item = u8;
-    const LEN: usize = L;
+    D: AsData<Data = [u8; B]>
+> AsData for SliceData<O, L, D> {
+    type Data = [u8; L];
 
-    #[inline]
-    fn index(&self, index: usize) -> Self::Item {
-        self.as_data()[index]
+    #[inline(always)]
+    fn as_data() -> &'static Self::Data {
+        D::as_data()[O..][..L].try_into().unwrap()
     }
 }
 
-impl<'data, K> MapStore<'data> for K
+impl<const B: usize, D> AccessSeq for D
 where
-    K: AccessSeq<'data>
+    D: AsData<Data = [u8; B]>
+{
+    type Item = u8;
+    const LEN: usize = B;
+
+    #[inline(always)]
+    fn index(index: usize) -> Option<Self::Item> {
+        D::as_data().get(index).copied()
+    }
+}
+
+impl<K> MapStore for K
+where
+    K: AccessSeq
 {
     type Key = K::Item;
     type Value = usize;
 
     const LEN: usize = K::LEN;
 
-    #[inline]
-    fn get_key(&self, index: usize) -> Self::Key {
-        self.index(index)
+    #[inline(always)]
+    fn get_key(index: usize) -> Option<Self::Key> {
+        K::index(index)
     }
 
-    #[inline]
-    fn get_value(&self, index: usize) -> Self::Value {
-        index
+    #[inline(always)]
+    fn get_value(index: usize) -> Option<Self::Value> {
+        debug_assert!(index < Self::LEN);
+        
+        Some(index)
     }
 }
 
-impl<'data, K, V> MapStore<'data> for (K, V)
+impl<K, V> MapStore for (K, V)
 where
-    K: AccessSeq<'data>,
-    V: AccessSeq<'data>
+    K: AccessSeq,
+    V: AccessSeq
 {
     type Key = K::Item;
     type Value = V::Item;
@@ -125,87 +101,52 @@ where
         K::LEN
     };
 
-    #[inline]
-    fn get_key(&self, index: usize) -> Self::Key {
-        self.0.index(index)
+    #[inline(always)]
+    fn get_key(index: usize) -> Option<Self::Key> {
+        K::index(index)
     }
 
-    #[inline]
-    fn get_value(&self, index: usize) -> Self::Value {
-        self.1.index(index)
-    }
-}
-
-impl<'data, M> MapStore<'data> for Ordered<M>
-where
-    M: MapStore<'data>
-{
-    type Key = M::Key;
-    type Value = M::Value;
-
-    const LEN: usize = M::LEN;
-
-    #[inline]
-    fn get_key(&self, index: usize) -> Self::Key {
-        self.0.get_key(index)
-    }
-
-    #[inline]
-    fn get_value(&self, index: usize) -> Self::Value {
-        self.0.get_value(index)
+    #[inline(always)]
+    fn get_value(index: usize) -> Option<Self::Value> {
+        V::index(index)
     }
 }
 
-impl<'data, const N: usize, T> Searchable<'data> for Ordered<List<'data, N, T>>
+impl<K, V> Searchable for (K, V)
 where
-    T: Copy
+    K: Searchable + AccessSeq,
+    K: MapStore<Key = K::Item>,
+    V: AccessSeq,
 {
-    fn search<Q>(&self, key: &Q) -> Option<Self::Value>
+    fn search<Q>(query: &Q) -> Option<usize>
     where
-        Self::Key: Borrow<Q>,
-        Q: Ord + ?Sized
+        Q: Comparable<K::Item> + ?Sized
     {
-        self.0.0.binary_search_by(|t| Ord::cmp(t.borrow(), key)).ok()
+        K::search(query)
     }
 }
 
-impl<'data, const N: usize, K, V> Searchable<'data> for Ordered<(List<'data, N, K>, V)>
-where
-    K: Copy,
-    V: AccessSeq<'data>
-{
-    fn search<Q>(&self, key: &Q) -> Option<Self::Value>
-    where
-        Self::Key: Borrow<Q>,
-        Q: Ord + ?Sized
-    {
-        let index = self.0.0.0.binary_search_by(|t| Ord::cmp(t.borrow(), key)).ok()?;
-        Some(self.0.1.index(index))
-    }
-}
-
-pub struct MapIter<'iter, 'data, D> {
-    store: &'iter D,
+pub struct MapIter<'iter, D> {
     next: usize,
-    _phantom: PhantomData<&'data D>
+    _phantom: PhantomData<&'iter D>
 }
 
-impl<'iter, 'data, D> MapIter<'iter, 'data, D> {
-    pub(super) const fn new(store: &'iter D) -> Self {
-        MapIter { store, next: 0, _phantom: PhantomData }
+impl<'iter, D> MapIter<'iter, D> {
+    pub(super) const fn new() -> Self {
+        MapIter { next: 0, _phantom: PhantomData }
     }
 }
 
-impl<'iter, 'data, D> Iterator for MapIter<'iter, 'data, D>
+impl<'iter, D> Iterator for MapIter<'iter, D>
 where
-    D: MapStore<'data>
+    D: MapStore
 {
     type Item = (D::Key, D::Value);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next < D::LEN {
-            let k = self.store.get_key(self.next);
-            let v = self.store.get_value(self.next);
+            let k = D::get_key(self.next)?;
+            let v = D::get_value(self.next)?;
             self.next += 1;
             Some((k, v))
         } else {
@@ -214,20 +155,19 @@ where
     }
 }
 
-impl<'iter, 'data, D> ExactSizeIterator for MapIter<'iter, 'data, D>
+impl<'iter, D> ExactSizeIterator for MapIter<'iter, D>
 where
-    D: MapStore<'data>
+    D: MapStore
 {
     fn len(&self) -> usize {
         D::LEN
     }
 }
 
-impl<'iter, 'data, D> Clone for MapIter<'iter, 'data, D> {
+impl<'iter, D> Clone for MapIter<'iter, D> {
     #[inline]
     fn clone(&self) -> Self {
         MapIter {
-            store: self.store,
             next: self.next,
             _phantom: PhantomData
         }

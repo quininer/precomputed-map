@@ -3,16 +3,13 @@
 
 #[cfg(feature = "builder")]
 pub mod builder;
-pub mod store;
-pub mod seq;
-pub mod aligned;
 pub mod phf;
 
 pub mod macros;
 pub mod equivalent;
-pub mod seq2;
-pub mod store2;
-pub mod aligned2;
+pub mod seq;
+pub mod store;
+pub mod aligned;
 
 use core::marker::PhantomData;
 use phf::HashOne;
@@ -22,35 +19,34 @@ use equivalent::{ Equivalent, Comparable, Hashable };
 /// Tiny map
 ///
 /// 0..16
-pub struct TinyMap<K: 'static, V: 'static> {
-    data: &'static [(K, V)],
+pub struct TinyMap<M> {
+    _phantom: PhantomData<M>
 }
 
-impl<K: 'static, V: 'static> TinyMap<K, V> {
-    pub const fn new(data: &'static [(K, V)]) -> TinyMap<K, V> {
-        TinyMap { data }
+impl<M: store::Searchable> TinyMap<M> {
+    pub const fn new() -> TinyMap<M> {
+        TinyMap { _phantom: PhantomData }
     }
 
-    pub fn len(&self) -> usize {
-        self.data.len()
+    pub const fn len(&self) -> usize {
+        M::LEN
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     pub fn get<Q>(&self, key: &Q)
-        -> Option<&V>
+        -> Option<M::Value>
     where
-        Q: Comparable<K> + ?Sized
+        Q: Comparable<M::Key> + ?Sized
     {
-        self.data.binary_search_by(|k| key.compare(&k.0).reverse())
-            .ok()
-            .map(|idx| &self.data[idx].1)
+        let idx = M::search(key)?;
+        M::get_value(idx)
     }
 
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&K, &V)> + '_ {
-        self.data.iter().map(|(k, v)| (k, v))
+    pub const fn iter(&self) -> store::MapIter<'_, M> {
+        store::MapIter::new()
     }
 }
 
@@ -64,7 +60,7 @@ pub struct SmallMap<D, H> {
 
 impl<D, H> SmallMap<D, H>
 where
-    D: store2::MapStore,
+    D: store::MapStore,
     H: HashOne,
 {
     pub const fn new(seed: u64) -> Self {
@@ -110,8 +106,8 @@ where
         }
     }
 
-    pub const fn iter(&self) -> store2::MapIter<'_, D> {
-        store2::MapIter::new()
+    pub const fn iter(&self) -> store::MapIter<'_, D> {
+        store::MapIter::new()
     }    
 }
 
@@ -140,9 +136,9 @@ impl<
     H,
 > MediumMap<SLOTS, P, R, D, H>
 where
-    P: store2::AccessSeq<Item = u8>,
-    R: store2::AccessSeq<Item = u32>,
-    D: store2::MapStore,
+    P: store::AccessSeq<Item = u8>,
+    R: store::AccessSeq<Item = u32>,
+    D: store::MapStore,
     H: HashOne
 {
     pub const fn new(seed: u64) -> Self {
@@ -192,8 +188,8 @@ where
         fn remap_and_index<R, D, Q>(index: usize, key: &Q)
         -> Option<D::Value>
         where
-            R: store2::AccessSeq<Item = u32>,
-            D: store2::MapStore,
+            R: store::AccessSeq<Item = u32>,
+            D: store::MapStore,
             Q: Equivalent<D::Key> + ?Sized,
         {
             let index: usize = R::index(index - D::LEN).unwrap().try_into().unwrap();
@@ -221,8 +217,8 @@ where
         }
     }
 
-    pub const fn iter(&self) -> store2::MapIter<'_, D> {
-        store2::MapIter::new()
+    pub const fn iter(&self) -> store::MapIter<'_, D> {
+        store::MapIter::new()
     }
 }
 

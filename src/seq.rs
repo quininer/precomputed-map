@@ -1,113 +1,31 @@
-use crate::aligned::AlignedArray;
-use crate::store::ConstSlice;
-use crate::store::AccessSeq;
-use crate::store::AsData;
+use core::marker::PhantomData;
+use crate::store::{ AsData, AccessSeq };
 
-pub struct List<'data, const N: usize, T>(pub &'data [T; N]);
-pub struct RefList<'data, const N: usize, T>(pub &'data [T; N]);
 
-pub struct CompactSeq<
-    'data,
-    const O: usize,
-    const L: usize,
-    SEQ,
-    BUF: ?Sized,
-> {
-    seq: SEQ,
-    data: ConstSlice<'data, O, L, BUF>,
-}
-
-impl<'data, const N: usize, T: Copy> AccessSeq<'data> for List<'data, N, T> {
-    type Item = T;
-
-    const LEN: usize = N;
-
-    #[inline]
-    fn index(&self, index: usize) -> Self::Item {
-        self.0[index]
-    }
-}
-
-impl<'data, const N: usize, T> AccessSeq<'data> for RefList<'data, N, T> {
-    type Item = &'data T;
-
-    const LEN: usize = N;
-
-    #[inline]
-    fn index(&self, index: usize) -> Self::Item {
-        &self.0[index]
-    }
-}
+pub struct CompactSeq<SEQ, BUF>(PhantomData<(SEQ, BUF)>);
 
 impl<
-    'data,
     const B: usize,
-    const O: usize,
-    const L: usize,
     SEQ,
-> AccessSeq<'data> for CompactSeq<'data, O, L, SEQ, [u8; B]>
+    BUF,
+> AccessSeq for CompactSeq<SEQ, BUF>
 where
-    SEQ: AccessSeq<'data, Item = u32>,
+    SEQ: AccessSeq<Item = u32>,
+    BUF: AsData<Data = [u8; B]>
 {
-    type Item = &'data [u8];
+    type Item = &'static [u8];
 
     const LEN: usize = SEQ::LEN;
 
-    #[inline]
-    fn index(&self, index: usize) -> Self::Item {
-        let start: usize = index.checked_sub(1)
-            .map(|index| self.seq.index(index))
-            .unwrap_or_default()
+    #[inline(always)]
+    fn index(index: usize) -> Option<Self::Item> {
+        let start: usize = match index.checked_sub(1) {
+            Some(index) => SEQ::index(index)?.try_into().unwrap(),
+            None => 0
+        };
+        let end: usize = SEQ::index(index)?
             .try_into()
             .unwrap();
-        let end: usize = self.seq.index(index)
-            .try_into()
-            .unwrap();
-        &self.data.as_data()[start..end]
-    }
-}
-
-impl<
-    'data,
-    const O: usize,
-    const L: usize,
-    SEQ,
-> AccessSeq<'data> for CompactSeq<'data, O, L, SEQ, str>
-where
-    SEQ: AccessSeq<'data, Item = u32>,
-{
-    type Item = &'data str;
-
-    const LEN: usize = SEQ::LEN;
-
-    #[inline]
-    fn index(&self, index: usize) -> Self::Item {
-        let start: usize = index.checked_sub(1)
-            .map(|index| self.seq.index(index))
-            .unwrap_or_default()
-            .try_into()
-            .unwrap();
-        let end: usize = self.seq.index(index)
-            .try_into()
-            .unwrap();
-        &self.data.as_data()[start..end]
-    }
-}
-
-impl<
-    'data,
-    const B: usize,
-    DATA
-> AccessSeq<'data> for AlignedArray<B, u32, DATA>
-where
-    DATA: AsData<Data = &'data [u8; B]>
-{
-    type Item = u32;
-
-    const LEN: usize = <AlignedArray<B, u32, DATA>>::LEN;
-
-    #[inline]
-    fn index(&self, index: usize) -> Self::Item {
-        self.get(index).unwrap()
+        BUF::as_data().get(start..end)
     }
 }

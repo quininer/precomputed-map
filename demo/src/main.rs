@@ -91,6 +91,7 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
     mapout.create_map("STR2ID_MAP".into(), pair, &mut builder).unwrap();
 
     let mut code_file = fs::File::create("examples/str2id.rs").unwrap();
+    code_file.write_all(b"#![allow(non_camel_case_types)]\n").unwrap();
     builder.write_to(&mut code_file).unwrap();
 
     writeln!(code_file,

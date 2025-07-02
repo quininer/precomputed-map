@@ -1,31 +1,64 @@
 #[macro_export]
 macro_rules! define {
-    ( const $name:ident: &[u8; $n:expr] = $path:literal ) => {
-        struct $name;
+    ( $vis:vis const $name:ident: &[u8; $n:expr] = include $path:literal ) => {
+        $vis struct $name;
 
-        impl $crate::store2::AsData for $name {
+        impl $crate::store::AsData for $name {
             type Data = [u8; $n];
 
             fn as_data() -> &'static Self::Data {
-                const $name: &[u8; $n] = include_bytes!($path);
-                $name
+                const VALUE: &[u8; $n] = include_bytes!($path);
+                VALUE
             }
         }
     };
-    ( const $name:ident: &[u32; $n:expr] = $path:literal ) => {
-        struct $name;
+    ( $vis:vis const $name:ident: &[u8 align $unit:ty; $n:expr] = include $path:literal ) => {
+        $vis struct $name;
 
-        impl $crate::store2::AsData for $name {
+        impl $crate::store::AsData for $name {
             type Data = [u8; $n];
 
             fn as_data() -> &'static Self::Data {
-                static $name: &$crate::aligned2::AlignedBytes<$n, u32> = &$crate::aligned2::AlignedBytes {
+                static VALUE: &$crate::aligned::AlignedBytes<$n, $unit> = &$crate::aligned::AlignedBytes {
                     align: [],
                     bytes: *include_bytes!($path)
                 };
 
-                &$name.bytes
+                &VALUE.bytes
             }
         }
     };
+    ( $vis:vis const searchable $name:ident: &[$unit:ty; $n:expr] = $v:expr ) => {
+        $crate::define!($vis const $name: &[$unit; $n] = $v );
+
+        impl $crate::store::Searchable for $name {
+            fn search<Q>(query: &Q)
+                -> Option<Self::Value>
+            where
+                Q: $crate::equivalent::Comparable<Self::Key> + ?Sized
+            {
+                let values = $name.as_slice();
+                values.binary_search_by(|k| query.compare(k).reverse()).ok()
+            }
+        }        
+    };
+    ( $vis:vis const $name:ident: &[$unit:ty; $n:expr] = $v:expr ) => {
+        $vis struct $name;
+
+        impl $name {
+            fn as_slice(&self) -> &[$unit] {
+                static VALUE: &[$unit; $n] = $v;
+                VALUE
+            }
+        }
+
+        impl $crate::store::AccessSeq for $name {
+            type Item = $unit;
+            const LEN: usize = $n;
+
+            fn index(index: usize) -> Option<Self::Item> {
+                $name.as_slice().get(index).copied()
+            }
+        }
+    }
 }
