@@ -1,5 +1,6 @@
 use std::{ fs, fmt };
 use std::io::{ self, Write };
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::collections::HashMap;
 use super::{ MapOutput, MapKind };
@@ -25,14 +26,13 @@ struct BytesWriter {
     writer: Option<CountWriter<fs::File>>,
 }
 
-pub struct ShortBytesPool {
+pub struct ShortBytesPool<'s> {
     entry: String,
     buf: Vec<u8>,
-    offset: u32,
-    map: HashMap<Vec<u8>, ShortBytesId>
+    map: HashMap<Cow<'s, [u8]>, ShortBytesId>
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct ShortBytesId(u32);
 
 pub struct ReferenceId(usize);
@@ -231,6 +231,15 @@ impl<'a> CodeBuilder<'a> {
         Ok(ReferenceId(id))
     }
 
+    pub fn create_keys<SEQ, T>(&mut self, name: String, item_type: String, mapout: &MapOutput, seq: SEQ)
+        -> io::Result<ReferenceId>
+    where
+        SEQ: Iterator<Item = T> + ExactSizeIterator,
+        T: fmt::Display
+    {
+        self.create_list_raw(Some(name), item_type, matches!(mapout.kind, MapKind::Tiny), seq)
+    }
+
     pub fn create_list<SEQ, T>(&mut self, name: String, item_type: String, seq: SEQ)
         -> io::Result<ReferenceId>
     where
@@ -249,7 +258,25 @@ impl<'a> CodeBuilder<'a> {
         ReferenceId(id)
     }
 
+    pub fn create_bytes_position_keys<SEQ, B>(&mut self, name: String, mapout: &MapOutput, seq: SEQ)
+        -> io::Result<ReferenceId>
+    where
+        SEQ: Iterator<Item = B> + ExactSizeIterator,
+        B: AsRef<[u8]>
+    {
+        self.create_bytes_position_seq_raw(name, matches!(mapout.kind, MapKind::Tiny), seq)
+    }
+
     pub fn create_bytes_position_seq<SEQ, B>(&mut self, name: String, seq: SEQ)
+        -> io::Result<ReferenceId>
+    where
+        SEQ: Iterator<Item = B> + ExactSizeIterator,
+        B: AsRef<[u8]>
+    {
+        self.create_bytes_position_seq_raw(name, false, seq)
+    }
+
+    fn create_bytes_position_seq_raw<SEQ, B>(&mut self, name: String, is_sorted_keys: bool, seq: SEQ)
         -> io::Result<ReferenceId>
     where
         SEQ: Iterator<Item = B> + ExactSizeIterator,
@@ -277,7 +304,7 @@ impl<'a> CodeBuilder<'a> {
             });
             Ok(ReferenceId(id))
         } else {
-            self.create_list_raw(Some(name), "&'static [u8]".into(), true, seq.map(|b| format!("&{:?}", b.as_ref())))
+            self.create_list_raw(Some(name), "&'static [u8]".into(), is_sorted_keys, seq.map(|b| format!("&{:?}", b.as_ref())))
         }
     }
 
@@ -555,5 +582,13 @@ impl U32SeqWriter {
         }
 
         Ok(())
+    }
+}
+
+impl<'s> ShortBytesPool<'s> {
+    pub fn insert_cow(&mut self, value: Cow<'s, [u8]>) -> ShortBytesId {
+        self.map.entry(value);
+        
+        todo!()
     }
 }

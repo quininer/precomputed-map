@@ -101,7 +101,7 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
     let k = mapout.reorder(map).map(|(k, _)| k.as_bytes());
     let v = mapout.reorder(map).map(|(_, v)| *v);
 
-    let k = builder.create_bytes_position_seq("STR2ID_STR".into(), k).unwrap();
+    let k = builder.create_bytes_position_keys("STR2ID_STR".into(), &mapout, k).unwrap();
     let v = builder.create_u32_seq("STR2ID_ID".into(), v).unwrap();
     let pair = builder.create_pair(k, v);
 

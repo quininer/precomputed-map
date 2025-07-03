@@ -67,7 +67,7 @@ let mut builder = precomputed_map::builder::CodeBuilder::new(
 
 let kseq = mapout.reorder(keys).map(|s| s.as_bytes());
 let vseq = mapout.reorder(values).map(|s| s.as_bytes();
-let k = builder.create_bytes_position_seq("MyMapKeys".into(), kseq).unwrap();
+let k = builder.create_bytes_position_keys("MyMapKeys".into(), &mapout, kseq).unwrap();
 let v = builder.create_bytes_position_seq("MyMapValues".into(), vseq).unwrap();
 let pair = builder.create_pair(k, v);
 
