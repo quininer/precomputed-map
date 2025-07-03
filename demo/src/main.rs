@@ -14,7 +14,7 @@ fn main() {
     let num = args.next()
         .map(|num| num.parse::<u32>().unwrap())
         .unwrap_or(10000);
-    let hash = args.next();
+    let hash = std::env::var("HASH").ok();
 
     let _ = fs::create_dir("examples");
 
@@ -35,6 +35,8 @@ fn main() {
 }
 
 fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
+    let mode = std::env::var("MODE").ok();
+    
     let keys = (0..map.len()).collect::<Vec<usize>>();
 
     let mut map_builder = precomputed_map::builder::MapBuilder::new();
@@ -99,10 +101,25 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
         &mut u32seq
     );
 
-    let k = mapout.reorder(map).map(|(k, _)| strpool.insert(k.as_bytes())).collect::<Vec<_>>();
+    let k = match mode.as_deref() {
+        Some("pooled") => {
+            let k = mapout.reorder(map).map(|(k, _)| strpool.insert(k.as_bytes())).collect::<Vec<_>>();
+            builder.create_short_id_seq("STR2ID_STR".into(), &strpool, k.iter().copied()).unwrap()
+        },
+        Some("position") => {
+            let k = mapout.reorder(map).map(|(k, _)| k.as_bytes());
+            builder.create_bytes_position_seq("STR2ID_STR".into(), k).unwrap()
+        },
+        Some(_) => {
+            panic!("unknown mode");
+        },
+        None => {
+            let k = mapout.reorder(map).map(|(k, _)| k.as_bytes());
+            builder.create_bytes_keys("STR2ID_STR".into(), &mapout, k).unwrap()
+        }
+    };
+    
     let v = mapout.reorder(map).map(|(_, v)| *v);
-
-    let k = builder.create_short_id_seq("STR2ID_STR".into(), &strpool, k.iter().copied()).unwrap();
     let v = builder.create_u32_seq("STR2ID_ID".into(), v).unwrap();
     let pair = builder.create_pair(k, v);
 
@@ -166,18 +183,16 @@ fn naive(map: &[(String, u32)], hash: Option<&str>) {
     let mut code_file = fs::File::create("examples/str2id_naive.rs").unwrap();
 
     let hasher = match hash {
-        Some("sip") => "siphasher::sip::SipHasher13",
-        Some("xx3") => "xxhash_rust::xxh3::Xxh3",
-        Some("fx") => "rustc_hash::FxHasher",
-        Some("fold") => "foldhash::fast::FoldHasher",
-        Some("gx") => "gxhash::GxHasher",
-        _ => "std::collections::hash_map::DefaultHasher"
+        Some("sip") => "std::hash::BuildHasherDefault<siphasher::sip::SipHasher13>",
+        Some("xx3") => "xxhash_rust::xxh3::Xxh3Builder",
+        Some("fx") => "rustc_hash::FxBuildHasher",
+        Some("fold") => "foldhash::fast::RandomState",
+        Some("gx") => "gxhash::GxBuildHasher",
+        _ => "std::collections::hash_map::RandomState"
     };    
 
     writeln!(code_file,
         r#"
-use std::hash::BuildHasherDefault;
-        
 fn main() {{
     use std::fmt::Write;
     use std::collections::hash_map::DefaultHasher;
@@ -193,7 +208,7 @@ fn main() {{
     println!("startup: {{:?}}", now.elapsed());
 
     let s = std::hint::black_box({:?});
-    let id = std::hint::black_box(&STR2ID_MAP).get(s).unwrap();
+    let id = std::hint::black_box(&STR2ID_MAP).get(s.as_bytes()).unwrap();
     assert_eq!(*id, {});
 
     let timer = criterion_cycles_per_byte::CyclesPerByte;
@@ -207,7 +222,7 @@ fn main() {{
             buf.clear();
             write!(buf, "{{:x}}{{}}", hash, id).unwrap();
             let k = &buf;
-            let s = std::hint::black_box(k.as_str());
+            let s = std::hint::black_box(k.as_bytes());
 
             let start = timer.start();
             let id = map_get(std::hint::black_box(&STR2ID_MAP), s);
@@ -225,25 +240,25 @@ fn main() {{
 use std::collections::HashMap;
 
 #[inline(never)]
-fn map_get(map: &HashMap<&'static str, u32, BuildHasherDefault<{hasher}>>, s: &str) -> Option<u32> {{
+fn map_get(map: &HashMap<&'static [u8], u32, {hasher}>, s: &[u8]) -> Option<u32> {{
     map.get(s).copied()
 }}
 
-static STR2ID_DATA: &'static [(&'static str, u32)] = &[
+static STR2ID_DATA: &'static [(&'static [u8], u32)] = &[
         "#,
         map[1].0,
         map[1].1
     ).unwrap();
 
     for (k, v) in map {
-        writeln!(code_file, "(\"{}\", {}),", k, v).unwrap();
+        writeln!(code_file, "(b\"{}\", {}),", k, v).unwrap();
     }
 
     writeln!(code_file,
         r#"
 ];
 
-static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static str, u32, BuildHasherDefault<{hasher}>>> = std::sync::LazyLock::new(||
+static STR2ID_MAP: std::sync::LazyLock<HashMap<&'static [u8], u32, {hasher}>> = std::sync::LazyLock::new(||
     STR2ID_DATA    
         .into_iter()
         .copied()
