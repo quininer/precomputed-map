@@ -48,21 +48,35 @@ let mapout = precomputed_map::builder::MapBuilder::new()
     .build(&keys)
     .unwrap();
 
+let dir = PathBuf::from("src/generated");
+
+// remove old file
+let _ = fs::remove_file(dir.join("mymap.u8"));
+let _ = fs::remove_file(dir.join("mymap.u32"));
+
+let mut u8seq = U32SeqWriter::new("PrecomputedU8".into(), dir.join("mymap.u8"));
+let mut u32seq = U32SeqWriter::new("PrecomputedU32".into(), dir.join("mymap.u32"));
+
 // generate code
 let mut builder = precomputed_map::builder::CodeBuilder::new(
-    "mymap".into(),
+    "MyMap".into(),
     "MyHasher".into(),
-    "src/generated".into(),
+    &mut u8seq,
+    &mut u32seq,
 );
 
-let k = builder.create_str_seq("MyMapKeys".into(), mapout.reorder(keys)).unwrap();
-let v = builder.create_str_seq("MyMapValues".into(), mapout.reorder(values)).unwrap();
+let kseq = mapout.reorder(keys).map(|s| s.as_bytes());
+let vseq = mapout.reorder(values).map(|s| s.as_bytes();
+let k = builder.create_bytes_position_seq("MyMapKeys".into(), kseq).unwrap();
+let v = builder.create_bytes_position_seq("MyMapValues".into(), vseq).unwrap();
 let pair = builder.create_pair(k, v);
 
 mapout.create_map("MYMAP".into(), pair, &mut builder).unwrap();
 
-let mut codeout = fs::File::create("examples/mymap.rs").unwrap();
+let mut codeout = fs::File::create(dir.join("mymap.rs")).unwrap();
 builder.write_to(&mut codeout).unwrap();
+u8seq.write_to(&mut code_file).unwrap();
+u32seq.write_to(&mut code_file).unwrap();
 ```
 
 # License

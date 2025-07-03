@@ -2,13 +2,13 @@ use core::marker::PhantomData;
 use crate::store::{ AsData, AccessSeq };
 
 
-pub struct CompactSeq<SEQ, BUF>(PhantomData<(SEQ, BUF)>);
+pub struct PositionSeq<SEQ, BUF>(PhantomData<(SEQ, BUF)>);
 
 impl<
     const B: usize,
     SEQ,
     BUF,
-> AccessSeq for CompactSeq<SEQ, BUF>
+> AccessSeq for PositionSeq<SEQ, BUF>
 where
     SEQ: AccessSeq<Item = u32>,
     BUF: AsData<Data = [u8; B]>

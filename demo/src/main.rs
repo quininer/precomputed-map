@@ -4,6 +4,7 @@ mod hash;
 
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use precomputed_map::phf::HashOne;
 
 fn main() {
@@ -75,24 +76,42 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
 
     dbg!(mapout.seed());
 
+    let dir = PathBuf::from("examples");
+
+    // remove old file
+    let _ = fs::remove_file(dir.join("str2id.bytes"));
+    let _ = fs::remove_file(dir.join("str2id.u32seq"));
+
+    let mut u8seq = precomputed_map::builder::U8SeqWriter::new(
+        "PrecomputedU8Seq".into(),
+        dir.join("str2id.bytes"),
+    );
+    let mut u32seq = precomputed_map::builder::U32SeqWriter::new(
+        "PrecomputedU32Seq".into(),
+        dir.join("str2id.u32seq"),
+    );
+
     let mut builder = precomputed_map::builder::CodeBuilder::new(
         "str2id".into(),
         hasher.into(),
-        "examples".into(),
+        &mut u8seq,
+        &mut u32seq
     );
 
     let k = mapout.reorder(map).map(|(k, _)| k.as_bytes());
     let v = mapout.reorder(map).map(|(_, v)| *v);
 
-    let k = builder.create_bytes_seq("STR2ID_STR".into(), k).unwrap();
+    let k = builder.create_bytes_position_seq("STR2ID_STR".into(), k).unwrap();
     let v = builder.create_u32_seq("STR2ID_ID".into(), v).unwrap();
     let pair = builder.create_pair(k, v);
 
     mapout.create_map("STR2ID_MAP".into(), pair, &mut builder).unwrap();
 
-    let mut code_file = fs::File::create("examples/str2id.rs").unwrap();
+    let mut code_file = fs::File::create(dir.join("str2id.rs")).unwrap();
     code_file.write_all(b"#![allow(non_camel_case_types)]\n").unwrap();
     builder.write_to(&mut code_file).unwrap();
+    u8seq.write_to(&mut code_file).unwrap();
+    u32seq.write_to(&mut code_file).unwrap();
 
     writeln!(code_file,
         r#"
