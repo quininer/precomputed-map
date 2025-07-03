@@ -17,6 +17,7 @@ pub struct MapBuilder<'a, K> {
     ord: Option<OrdFunc<'a, K>>,
     hash: Option<HashFunc<'a, K>>,
     next_seed: fn(u64, u64) -> u64,
+    force_build: bool,
 }
 
 pub type OrdFunc<'a, K> = &'a dyn Fn(&K, &K) -> cmp::Ordering;
@@ -35,6 +36,7 @@ impl<'a, K> MapBuilder<'a, K> {
             seed: None,
             ord: None,
             hash: None,
+            force_build: false,
             next_seed: |init_seed, c| {
                 use std::hash::Hasher;
 
@@ -44,6 +46,12 @@ impl<'a, K> MapBuilder<'a, K> {
                 hasher.finish()
             },
         }
+    }
+
+    /// Try to construct even if keys is very large
+    pub fn force_build(&mut self, flag: bool) -> &mut Self {
+        self.force_build = flag;
+        self
     }
 
     pub fn set_limit(&mut self, limit: Option<u64>) -> &mut Self {
@@ -100,7 +108,7 @@ impl<'a, K> MapBuilder<'a, K> {
             }
         }
 
-        if keys.len() > 10 * 1024 * 1024 {
+        if !self.force_build && keys.len() > 10 * 1024 * 1024 {
             return Err(BuildFailed("WARN: \
                 We currently don't have good support for large numbers of keys,\
                 and this construction may be slow or not complete in a reasonable time.\
