@@ -26,14 +26,14 @@ struct BytesWriter {
     writer: Option<CountWriter<fs::File>>,
 }
 
-pub struct ShortBytesPool<'s> {
+pub struct ShortPool<'s> {
     entry: String,
     buf: Vec<u8>,
-    map: HashMap<Cow<'s, [u8]>, ShortBytesId>
+    map: HashMap<Cow<'s, [u8]>, ShortId>
 }
 
-#[derive(Clone)]
-pub struct ShortBytesId(u32);
+#[derive(Clone, Copy)]
+pub struct ShortId(u32);
 
 pub struct ReferenceId(usize);
 
@@ -54,6 +54,10 @@ enum OutputKind {
         offset: usize,
         len: usize,
         index: ReferenceId
+    },
+    BytesShortSeq {
+        pooled_id: String,
+        index: ReferenceId,
     },
     U32Seq {
         offset: usize,
@@ -113,7 +117,7 @@ impl MapOutput {
     /// # NOTE
     ///
     /// The provided data must be reordered, otherwise the behavior will be unexpected.
-    pub fn create_map(&self, name: String, data: ReferenceId, builder: &mut CodeBuilder)
+    pub fn create_map(self, name: String, data: ReferenceId, builder: &mut CodeBuilder)
         -> io::Result<ReferenceId>
     {
         match &self.kind {
@@ -258,13 +262,22 @@ impl<'a> CodeBuilder<'a> {
         ReferenceId(id)
     }
 
-    pub fn create_bytes_position_keys<SEQ, B>(&mut self, name: String, mapout: &MapOutput, seq: SEQ)
+    pub fn create_bytes_keys<SEQ, B>(&mut self, name: String, mapout: &MapOutput, seq: SEQ)
         -> io::Result<ReferenceId>
     where
         SEQ: Iterator<Item = B> + ExactSizeIterator,
         B: AsRef<[u8]>
     {
-        self.create_bytes_position_seq_raw(name, matches!(mapout.kind, MapKind::Tiny), seq)
+        if seq.len() > 16 {
+            self.create_bytes_position_seq(name, seq)
+        } else {
+            self.create_list_raw(
+                Some(name),
+                "&'static [u8]".into(),
+                matches!(mapout.kind, MapKind::Tiny),
+                seq.map(|b| format!("&{:?}", b.as_ref()))
+            )
+        }
     }
 
     pub fn create_bytes_position_seq<SEQ, B>(&mut self, name: String, seq: SEQ)
@@ -273,39 +286,26 @@ impl<'a> CodeBuilder<'a> {
         SEQ: Iterator<Item = B> + ExactSizeIterator,
         B: AsRef<[u8]>
     {
-        self.create_bytes_position_seq_raw(name, false, seq)
-    }
+        let offset = self.u8seq_writer.count();
+        let mut count = 0;
+        let mut list = Vec::new();
+        for buf in seq {
+            let buf = buf.as_ref();
+            self.u8seq_writer.write_u8seq(buf)?;
 
-    fn create_bytes_position_seq_raw<SEQ, B>(&mut self, name: String, is_sorted_keys: bool, seq: SEQ)
-        -> io::Result<ReferenceId>
-    where
-        SEQ: Iterator<Item = B> + ExactSizeIterator,
-        B: AsRef<[u8]>
-    {
-        if seq.len() > 16 {
-            let offset = self.u8seq_writer.count();
-            let mut count = 0;
-            let mut list = Vec::new();
-            for buf in seq {
-                let buf = buf.as_ref();
-                self.u8seq_writer.write_u8seq(buf)?;
-
-                let len: u32 = buf.len().try_into().unwrap();
-                count += len;
-                list.push(count);
-            }
-            let len = self.u8seq_writer.count() - offset;
-            let index = self.create_u32_seq_raw(None, list.iter().copied())?;
-
-            let id = self.list.len();
-            self.list.push(OutputEntry {
-                name: Some(name),
-                kind: OutputKind::BytesPositionSeq { offset, len, index }
-            });
-            Ok(ReferenceId(id))
-        } else {
-            self.create_list_raw(Some(name), "&'static [u8]".into(), is_sorted_keys, seq.map(|b| format!("&{:?}", b.as_ref())))
+            let len: u32 = buf.len().try_into().unwrap();
+            count += len;
+            list.push(count);
         }
+        let len = self.u8seq_writer.count() - offset;
+        let index = self.create_u32_seq_raw(None, list.iter().copied())?;
+
+        let id = self.list.len();
+        self.list.push(OutputEntry {
+            name: Some(name),
+            kind: OutputKind::BytesPositionSeq { offset, len, index }
+        });
+        Ok(ReferenceId(id))
     }
 
     fn create_u32_seq_raw<SEQ>(&mut self, name: Option<String>, seq: SEQ)
@@ -337,6 +337,22 @@ impl<'a> CodeBuilder<'a> {
         SEQ: Iterator<Item = u32> + ExactSizeIterator
     {
         self.create_u32_seq_raw(Some(name), seq)
+    }
+
+    pub fn create_short_id_seq<SEQ>(&mut self, name: String, pool: &ShortPool<'_>, seq: SEQ)
+        -> io::Result<ReferenceId>
+    where
+        SEQ: Iterator<Item = ShortId> + ExactSizeIterator
+    {
+        let index = self.create_u32_seq_raw(None, seq.map(|id| id.0))?;
+        let id = self.list.len();
+        self.list.push(OutputEntry {
+            name: Some(name),
+            kind: OutputKind::BytesShortSeq {
+                pooled_id: pool.entry.clone(), index
+            }
+        });
+        Ok(ReferenceId(id))
     }
 
     pub fn write_to(self, writer: &mut dyn io::Write) -> io::Result<()> {
@@ -408,6 +424,17 @@ impl<'a> CodeBuilder<'a> {
                     writeln!(writer, "{vis}type {} = {};", entry_name, ty)?;
                     ReferenceEntry { name: entry_name.clone() }                    
                 },
+                OutputKind::BytesShortSeq { pooled_id, index } => {
+                    let ty = format!(
+                        "{crate_name}::seq::PooledSeq<{}, {}>",
+                        &list[index.0].name,
+                        pooled_id
+                    );
+
+                    let entry_name = entry.name.as_ref().unwrap();
+                    writeln!(writer, "{vis}type {} = {};", entry_name, ty)?;
+                    ReferenceEntry { name: entry_name.clone() }
+                }
                 OutputKind::List { item_type, value, len, searchable } => {
                     let namebuf;
                     let entry_name = if let Some(name) = entry.name.as_ref() {
@@ -585,10 +612,75 @@ impl U32SeqWriter {
     }
 }
 
-impl<'s> ShortBytesPool<'s> {
-    pub fn insert_cow(&mut self, value: Cow<'s, [u8]>) -> ShortBytesId {
-        self.map.entry(value);
-        
-        todo!()
+impl<'s> ShortPool<'s> {
+    pub fn new(entry: String) -> ShortPool<'s> {
+        ShortPool {
+            entry,
+            buf: Vec::new(),
+            map: HashMap::new()
+        }
+    }
+
+    pub fn insert(&mut self, value: &'s [u8]) -> ShortId {
+        self.insert_cow(value.into())
+    }
+    
+    pub fn insert_cow(&mut self, value: Cow<'s, [u8]>) -> ShortId {
+        *self.map.entry(value.clone()).or_insert_with(|| {
+            let offset = self.buf.len();
+            self.buf.extend_from_slice(&value);
+            let len: u8 = (self.buf.len() - offset).try_into().unwrap();
+            let offset: u32 = offset.try_into().unwrap();
+
+            if offset > (1 << 24) {
+                panic!("bytes pool too large");
+            }
+
+            ShortId(offset | (u32::from(len) << 24))
+        })
+    }
+
+    pub fn write_to(self, builder: &mut CodeBuilder<'_>, writer: &mut dyn io::Write) -> io::Result<()> {
+        if self.map.is_empty() {
+            return Ok(());
+        }
+
+        let crate_name = env!("CARGO_CRATE_NAME");
+        let vis = builder.vis.as_deref()
+            .map(|vis| format!("pub({}) ", vis))
+            .unwrap_or_default();        
+
+        let data_offset = builder.u8seq_writer.count();
+        builder.u8seq_writer.write_u8seq(&self.buf)?;
+        let data_len = builder.u8seq_writer.count() - data_offset;
+
+        writeln!(writer,
+            r#"
+#[derive(Clone, Copy)]
+{vis}struct {name}(u32);
+
+impl From<u32> for {name} {{
+    fn from(n: u32) -> Self {{
+        {name}(n)
+    }}
+}}
+
+impl {crate_name}::seq::PooledId for {name} {{
+    fn get(self) -> Option<&'static [u8]> {{
+        use {crate_name}::store::AsData;
+    
+        const BIT: usize = 24;
+    
+        let offset: usize = (self.0 & ((1 << BIT) - 1)).try_into().unwrap();
+        let len: usize = (self.0 >> BIT).try_into().unwrap();
+
+        <{crate_name}::store::SliceData<{data_offset}, {data_len}, {u8seq}>>::as_data()
+            .get(offset..offset + len)
+    }}
+}}
+            "#,
+            u8seq = builder.u8seq_writer.0.entry,
+            name = self.entry,
+        )
     }
 }

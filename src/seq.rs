@@ -29,3 +29,23 @@ where
         BUF::as_data().get(start..end)
     }
 }
+
+pub struct PooledSeq<SEQ, ID>(PhantomData<(SEQ, ID)>);
+
+pub trait PooledId: From<u32> + Copy {
+    fn get(self) -> Option<&'static [u8]>;
+}
+
+impl<SEQ, ID> AccessSeq for PooledSeq<SEQ, ID>
+where
+    SEQ: AccessSeq<Item = u32>,
+    ID: PooledId
+{
+    type Item = &'static [u8];
+    const LEN: usize = SEQ::LEN;
+
+    fn index(index: usize) -> Option<Self::Item> {
+        let id = SEQ::index(index)?;
+        ID::from(id).get()
+    }
+}

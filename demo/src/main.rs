@@ -90,6 +90,7 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
         "PrecomputedU32Seq".into(),
         dir.join("str2id.u32seq"),
     );
+    let mut strpool = precomputed_map::builder::ShortPool::new("PrecomputedPool".into());
 
     let mut builder = precomputed_map::builder::CodeBuilder::new(
         "str2id".into(),
@@ -98,10 +99,10 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
         &mut u32seq
     );
 
-    let k = mapout.reorder(map).map(|(k, _)| k.as_bytes());
+    let k = mapout.reorder(map).map(|(k, _)| strpool.insert(k.as_bytes())).collect::<Vec<_>>();
     let v = mapout.reorder(map).map(|(_, v)| *v);
 
-    let k = builder.create_bytes_position_keys("STR2ID_STR".into(), &mapout, k).unwrap();
+    let k = builder.create_short_id_seq("STR2ID_STR".into(), &strpool, k.iter().copied()).unwrap();
     let v = builder.create_u32_seq("STR2ID_ID".into(), v).unwrap();
     let pair = builder.create_pair(k, v);
 
@@ -109,6 +110,7 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
 
     let mut code_file = fs::File::create(dir.join("str2id.rs")).unwrap();
     code_file.write_all(b"#![allow(non_camel_case_types)]\n").unwrap();
+    strpool.write_to(&mut builder, &mut code_file).unwrap();
     builder.write_to(&mut code_file).unwrap();
     u8seq.write_to(&mut code_file).unwrap();
     u32seq.write_to(&mut code_file).unwrap();
