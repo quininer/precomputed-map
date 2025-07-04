@@ -117,7 +117,7 @@ impl MapOutput {
     /// # NOTE
     ///
     /// The provided data must be reordered, otherwise the behavior will be unexpected.
-    pub fn create_map(self, name: String, data: ReferenceId, builder: &mut CodeBuilder)
+    pub fn create_map(&self, name: String, data: ReferenceId, builder: &mut CodeBuilder)
         -> io::Result<ReferenceId>
     {
         match &self.kind {

@@ -44,6 +44,7 @@ where
     type Item = &'static [u8];
     const LEN: usize = SEQ::LEN;
 
+    #[inline(always)]
     fn index(index: usize) -> Option<Self::Item> {
         let id = SEQ::index(index)?;
         ID::from(id).get()
