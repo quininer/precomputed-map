@@ -127,10 +127,10 @@ fn precomputed(map: &[(String, u32)], hash: Option<&str>) {
 
     let mut code_file = fs::File::create(dir.join("str2id.rs")).unwrap();
     code_file.write_all(b"#![allow(non_camel_case_types)]\n").unwrap();
-    strpool.write_to(&mut builder, &mut code_file).unwrap();
-    builder.write_to(&mut code_file).unwrap();
-    u8seq.write_to(&mut code_file).unwrap();
-    u32seq.write_to(&mut code_file).unwrap();
+    strpool.codegen(&mut builder, &mut code_file).unwrap();
+    builder.codegen(&mut code_file).unwrap();
+    u8seq.codegen(&mut code_file).unwrap();
+    u32seq.codegen(&mut code_file).unwrap();
 
     writeln!(code_file,
         r#"

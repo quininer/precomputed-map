@@ -1,3 +1,5 @@
+//! Precomputed Map builder
+
 #![allow(clippy::uninlined_format_args)]
 
 #[cfg(test)]
@@ -127,7 +129,7 @@ impl<'a, K> MapBuilder<'a, K> {
 pub struct BuildFailed(&'static str);
 
 #[derive(Debug)]
-pub enum MapKind {
+enum MapKind {
     Tiny,
     Small(u64),
     Medium {
@@ -145,8 +147,9 @@ impl fmt::Display for BuildFailed {
 
 impl std::error::Error for BuildFailed {}
 
+/// Map output
 #[derive(Debug)]
 pub struct MapOutput {
-    pub kind: MapKind,
-    pub index: Box<[usize]>
+    kind: MapKind,
+    index: Box<[usize]>
 }

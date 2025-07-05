@@ -1,4 +1,4 @@
-//! fork from https://github.com/indexmap-rs/equivalent/blob/v1.0.2/src/lib.rs
+//! fork from <https://github.com/indexmap-rs/equivalent/blob/v1.0.2/src/lib.rs>
 
 use core::hash::Hash;
 use core::cmp::Ordering;
@@ -53,6 +53,7 @@ where
     }
 }
 
+/// Hashable trait.
 pub trait Hashable<H: HashOne> {
     fn hash(&self, seed: u64) -> u64;
 }

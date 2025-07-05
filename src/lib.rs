@@ -5,7 +5,7 @@
 pub mod builder;
 pub mod phf;
 
-pub mod macros;
+mod macros;
 pub mod equivalent;
 pub mod seq;
 pub mod store;
@@ -24,6 +24,7 @@ pub struct TinyMap<M> {
 }
 
 impl<M: store::Searchable> TinyMap<M> {
+    #[doc(hidden)]
     #[allow(clippy::new_without_default)]
     pub const fn new() -> TinyMap<M> {
         TinyMap { _phantom: PhantomData }
@@ -64,6 +65,7 @@ where
     D: store::MapStore,
     H: HashOne,
 {
+    #[doc(hidden)]
     pub const fn new(seed: u64) -> Self {
         SmallMap {
             seed,
@@ -139,6 +141,7 @@ where
     D: store::MapStore,
     H: HashOne
 {
+    #[doc(hidden)]
     pub const fn new(seed: u64) -> Self {
         MediumMap {
             seed,

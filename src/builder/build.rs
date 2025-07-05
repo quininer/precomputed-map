@@ -61,6 +61,13 @@ pub(super) fn build_small<K>(builder: &MapBuilder<'_, K>, keys: &[K])
 pub(super) fn build_medium<K>(builder: &MapBuilder<'_, K>, keys: &[K])
     -> Result<MapOutput, BuildFailed>
 {
+    // We basically have a no-shard [ptrhash](https://curiouscoding.nl/posts/ptrhash-log/),
+    // but there are slight differences in the construction algorithms.
+    //
+    // By avoid all unsafe and complex third-party dependencies,
+    // we are currently much slower than the official implementation.
+    // but it's basically fast enough for the scale of embedded binaries that are suitable.
+    
     #[derive(Default)]
     struct Bucket {
         slots: Vec<usize>

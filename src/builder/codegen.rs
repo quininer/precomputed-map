@@ -17,7 +17,10 @@ pub struct CodeBuilder<'a> {
     u32seq_writer: &'a mut U32SeqWriter,
 }
 
+/// U8 seq writer
 pub struct U8SeqWriter(BytesWriter);
+
+/// U32 seq writer
 pub struct U32SeqWriter(BytesWriter);
 
 struct BytesWriter {
@@ -26,15 +29,18 @@ struct BytesWriter {
     writer: Option<CountWriter<fs::File>>,
 }
 
+/// Short bytes pool
 pub struct ShortPool<'s> {
     entry: String,
     buf: Vec<u8>,
     map: HashMap<Cow<'s, [u8]>, ShortId>
 }
 
+/// Short bytes Id
 #[derive(Clone, Copy)]
 pub struct ShortId(u32);
 
+/// Reference Id
 pub struct ReferenceId(usize);
 
 struct OutputEntry {
@@ -355,7 +361,7 @@ impl<'a> CodeBuilder<'a> {
         Ok(ReferenceId(id))
     }
 
-    pub fn write_to(self, writer: &mut dyn io::Write) -> io::Result<()> {
+    pub fn codegen(self, writer: &mut dyn io::Write) -> io::Result<()> {
         struct ReferenceEntry {
             name: String,
         }
@@ -562,7 +568,7 @@ impl U8SeqWriter {
         self.0.writer.as_ref().map(|writer| writer.count).unwrap_or_default()
     }
 
-    pub fn write_to(self, code_writer: &mut dyn io::Write) -> io::Result<()> {
+    pub fn codegen(self, code_writer: &mut dyn io::Write) -> io::Result<()> {
         let crate_name = env!("CARGO_CRATE_NAME");
         
         if let Some(writer) = self.0.writer.as_ref() {
@@ -595,7 +601,7 @@ impl U32SeqWriter {
         self.0.writer.as_ref().map(|writer| writer.count).unwrap_or_default()
     }
 
-    pub fn write_to(self, code_writer: &mut dyn io::Write) -> io::Result<()> {
+    pub fn codegen(self, code_writer: &mut dyn io::Write) -> io::Result<()> {
         let crate_name = env!("CARGO_CRATE_NAME");
         
         if let Some(writer) = self.0.writer.as_ref() {
@@ -640,7 +646,12 @@ impl<'s> ShortPool<'s> {
         })
     }
 
-    pub fn write_to(self, builder: &mut CodeBuilder<'_>, writer: &mut dyn io::Write) -> io::Result<()> {
+    pub fn get(&self, id: ShortId) -> &[u8] {
+        let (offset, len) = crate::seq::pooled_unpack(id.0);
+        &self.buf[offset..][..len]
+    }
+
+    pub fn codegen(self, builder: &mut CodeBuilder<'_>, writer: &mut dyn io::Write) -> io::Result<()> {
         if self.map.is_empty() {
             return Ok(());
         }
@@ -669,11 +680,7 @@ impl {crate_name}::seq::PooledId for {name} {{
     fn get(self) -> Option<&'static [u8]> {{
         use {crate_name}::store::AsData;
     
-        const BIT: usize = 24;
-    
-        let offset: usize = (self.0 & ((1 << BIT) - 1)).try_into().unwrap();
-        let len: usize = (self.0 >> BIT).try_into().unwrap();
-
+        let (offset, len) = {crate_name}::seq::pooled_unpack(self.0);
         <{crate_name}::store::SliceData<{data_offset}, {data_len}, {u8seq}>>::as_data()
             .get(offset..offset + len)
     }}

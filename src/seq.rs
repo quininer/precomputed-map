@@ -50,3 +50,13 @@ where
         ID::from(id).get()
     }
 }
+
+#[inline(always)]
+pub fn pooled_unpack(n: u32) -> (usize, usize) {
+    const BIT: usize = 24;
+
+    let offset = (n & ((1 << BIT) - 1)).try_into().unwrap();
+    let len = (n >> BIT).try_into().unwrap();
+    
+    (offset, len)
+}

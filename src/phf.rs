@@ -1,6 +1,7 @@
 use core::hash::{ Hash, Hasher };
 use core::marker::PhantomData;
 
+/// Hash with seed
 pub trait HashOne {
     fn hash_one<T: Hash>(k: u64, v: T) -> u64;
 }

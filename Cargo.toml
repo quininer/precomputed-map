@@ -11,3 +11,6 @@ edition = "2024"
 
 [features]
 builder = []
+
+[package.metadata.docs.rs]
+all-features = true
