@@ -640,6 +640,11 @@ impl<'s> ShortPool<'s> {
         })
     }
 
+    pub fn get(&self, id: ShortId) -> &[u8] {
+        let (offset, len) = crate::seq::pooled_unpack(id.0);
+        &self.buf[offset..][..len]
+    }
+
     pub fn write_to(self, builder: &mut CodeBuilder<'_>, writer: &mut dyn io::Write) -> io::Result<()> {
         if self.map.is_empty() {
             return Ok(());
@@ -669,11 +674,7 @@ impl {crate_name}::seq::PooledId for {name} {{
     fn get(self) -> Option<&'static [u8]> {{
         use {crate_name}::store::AsData;
     
-        const BIT: usize = 24;
-    
-        let offset: usize = (self.0 & ((1 << BIT) - 1)).try_into().unwrap();
-        let len: usize = (self.0 >> BIT).try_into().unwrap();
-
+        let (offset, len) = {crate_name}::seq::pooled_unpack(self.0);
         <{crate_name}::store::SliceData<{data_offset}, {data_len}, {u8seq}>>::as_data()
             .get(offset..offset + len)
     }}
